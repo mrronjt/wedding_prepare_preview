@@ -176,6 +176,42 @@ textarea {
   gap: 10px;
 }
 
+.decision-form-section {
+  display: grid;
+  gap: 10px;
+}
+
+.decision-option-list {
+  display: grid;
+  gap: 10px;
+}
+
+.decision-option-editor {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  padding: 10px;
+}
+
+.decision-option-header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.decision-criteria-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.decision-linked-task-panel[hidden] {
+  display: none;
+}
+
 .readiness-card {
   display: grid;
   gap: 10px;
@@ -796,6 +832,9 @@ textarea {
 
 .sort-drop-zone {
   min-height: 56px;
+  border: 1px dashed transparent;
+  border-radius: 8px;
+  padding: 4px;
 }
 
 .sortable-checklist-row {
@@ -806,6 +845,7 @@ textarea {
   border-color: rgba(73, 111, 149, 0.72);
   background: #eef6fb;
   opacity: 0.72;
+  pointer-events: none;
 }
 
 .drag-handle {
@@ -878,7 +918,8 @@ textarea {
   gap: 8px;
 }
 
-#checklistOwnerCheckboxes label {
+#checklistOwnerCheckboxes label,
+#decisionLinkedTaskCheckboxes label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -886,6 +927,12 @@ textarea {
   border-radius: 999px;
   background: #fff;
   padding: 7px 10px;
+}
+
+#decisionLinkedTaskCheckboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 #checklistOwnerCheckboxes input {
@@ -1077,6 +1124,7 @@ dialog::backdrop {
   .decision-form,
   .decision-grid,
   .decision-result,
+  .decision-criteria-grid,
   .checklist-item-row,
   .candidate-row,
   .owner-row {

@@ -11,6 +11,7 @@ const DECISION_STATUSES = ["信息收集中", "对比中", "待拍板", "已决�
 const OPEN_DECISION_STATUSES = ["信息收集中", "对比中", "待拍板", "已决定"];
 const DONE_DECISION_STATUSES = ["已转任务", "暂缓"];
 const DEFAULT_COMPARISON_CRITERIA = ["预算/成本", "体验/价值", "风险/执行"];
+const MAX_DECISION_OPTIONS = 5;
 
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -872,40 +873,79 @@ function decisionStatusOptions(selectedStatus) {
     .join("");
 }
 
-function serializeDecisionComparison(decision) {
-  const criteria = decision.criteria?.length ? decision.criteria : DEFAULT_COMPARISON_CRITERIA;
-  const options = decision.options?.length
-    ? decision.options
-    : [
-        { name: "方案 A", notes: {} },
-        { name: "方案 B", notes: {} },
-        { name: "方案 C", notes: {} },
-      ];
-  return options
-    .map((option) => [option.name, ...criteria.map((criterion) => option.notes?.[criterion] || "")].join(" | "))
-    .join("\n");
+function defaultDecisionOptions() {
+  return [
+    { name: "方案 A", notes: { "预算/成本": "待补充", "体验/价值": "待补充", "风险/执行": "待补充" } },
+    { name: "方案 B", notes: { "预算/成本": "待补充", "体验/价值": "待补充", "风险/执行": "待补充" } },
+    { name: "方案 C", notes: { "预算/成本": "待补充", "体验/价值": "待补充", "风险/执行": "待补充" } },
+  ];
 }
 
-function parseDecisionComparison(text) {
+function normalizedDecisionComparison(decision = {}) {
+  const criteria = Array.isArray(decision.criteria) && decision.criteria.length
+    ? decision.criteria
+    : [...DEFAULT_COMPARISON_CRITERIA];
+  const sourceOptions = Array.isArray(decision.options) && decision.options.length
+    ? decision.options
+    : defaultDecisionOptions();
+  const options = sourceOptions.slice(0, MAX_DECISION_OPTIONS).map((option, index) => ({
+    name: option.name || `方案 ${index + 1}`,
+    notes: criteria.reduce((notes, criterion) => {
+      notes[criterion] = option.notes?.[criterion] || "";
+      return notes;
+    }, {}),
+  }));
+  return { criteria, options };
+}
+
+function renderDecisionComparisonEditor(decision) {
+  const container = document.getElementById("decisionComparisonEditor");
+  const addButton = document.getElementById("addDecisionOptionBtn");
+  const { criteria, options } = normalizedDecisionComparison(decision);
+  container.innerHTML = options
+    .map((option, optionIndex) => `
+      <article class="decision-option-editor" data-decision-option-index="${optionIndex}">
+        <div class="decision-option-header">
+          <label>
+            方案名称
+            <input data-decision-option-name value="${escapeAttribute(option.name)}" placeholder="例如：户外仪式 + 室内晚宴" autocomplete="off" />
+          </label>
+          <button class="icon-button danger" data-remove-decision-option="${optionIndex}" type="button" aria-label="删除方案">×</button>
+        </div>
+        <div class="decision-criteria-grid">
+          ${criteria
+            .map((criterion) => `
+              <label>
+                ${escapeHTML(criterion)}
+                <textarea data-decision-criterion="${escapeAttribute(criterion)}" rows="2" placeholder="填写这个方案的判断依据">${escapeHTML(option.notes?.[criterion] || "")}</textarea>
+              </label>
+            `)
+            .join("")}
+        </div>
+      </article>
+    `)
+    .join("");
+  addButton.disabled = options.length >= MAX_DECISION_OPTIONS;
+}
+
+function readDecisionComparisonEditor() {
   const criteria = [...DEFAULT_COMPARISON_CRITERIA];
-  const options = String(text || "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line, index) => {
-      const [name, ...values] = line.split(/\s*[|｜]\s*/);
+  const options = [...document.querySelectorAll("#decisionComparisonEditor [data-decision-option-index]")]
+    .map((node, index) => {
+      const name = node.querySelector("[data-decision-option-name]")?.value.trim() || `方案 ${index + 1}`;
       const notes = {};
-      criteria.forEach((criterion, criterionIndex) => {
-        notes[criterion] = values[criterionIndex] || "待补充";
+      criteria.forEach((criterion) => {
+        const control = [...node.querySelectorAll("[data-decision-criterion]")]
+          .find((item) => item.dataset.decisionCriterion === criterion);
+        notes[criterion] = control?.value.trim() || "";
       });
-      return {
-        name: name || `方案 ${index + 1}`,
-        notes,
-      };
-    });
+      return { name, notes };
+    })
+    .filter((option) => option.name || Object.values(option.notes).some(Boolean))
+    .slice(0, MAX_DECISION_OPTIONS);
   return {
     criteria,
-    options: options.length ? options.slice(0, 3) : [],
+    options: options.length ? options : defaultDecisionOptions(),
   };
 }
 
@@ -1932,19 +1972,15 @@ function moveSortItem(itemId, direction) {
 
 function moveSortItemToStage(itemId, stageKey) {
   if (!checklistSortDraft) return;
-  const fromStage = checklistSortDraft.stages.find((entry) => entry.itemIds.includes(itemId));
-  const toStage = checklistSortDraft.stages.find((entry) => entry.stageKey === stageKey);
-  if (!fromStage || !toStage || fromStage === toStage) return;
-  fromStage.itemIds = fromStage.itemIds.filter((id) => id !== itemId);
-  toStage.itemIds.push(itemId);
-  renderChecklist();
+  moveSortItemToPosition(itemId, stageKey);
 }
 
 function moveSortItemToPosition(itemId, targetStageKey, targetItemId = "", afterTarget = false) {
   if (!checklistSortDraft) return;
+  const before = JSON.stringify(checklistSortDraft.stages.map((stage) => [stage.stageKey, stage.itemIds]));
   const fromStage = checklistSortDraft.stages.find((entry) => entry.itemIds.includes(itemId));
   const toStage = checklistSortDraft.stages.find((entry) => entry.stageKey === targetStageKey);
-  if (!fromStage || !toStage) return;
+  if (!fromStage || !toStage) return false;
   fromStage.itemIds = fromStage.itemIds.filter((id) => id !== itemId);
   let insertIndex = toStage.itemIds.length;
   if (targetItemId && targetItemId !== itemId) {
@@ -1952,7 +1988,86 @@ function moveSortItemToPosition(itemId, targetStageKey, targetItemId = "", after
     if (targetIndex >= 0) insertIndex = targetIndex + (afterTarget ? 1 : 0);
   }
   toStage.itemIds.splice(insertIndex, 0, itemId);
+  const after = JSON.stringify(checklistSortDraft.stages.map((stage) => [stage.stageKey, stage.itemIds]));
+  if (before === after) return false;
   renderChecklist();
+  return true;
+}
+
+function markChecklistSortDraggingRow(itemId) {
+  [...document.querySelectorAll("[data-sort-item]")]
+    .find((row) => row.dataset.sortItem === itemId)
+    ?.classList.add("dragging");
+  document.body.classList.add("is-sorting-drag");
+}
+
+function findChecklistSortDropTarget(clientX, clientY) {
+  const target = document.elementFromPoint(clientX, clientY);
+  let bucket = target?.closest?.("[data-sort-stage-bucket]");
+  if (!bucket) {
+    const buckets = [...document.querySelectorAll("[data-sort-stage-bucket]")];
+    bucket = buckets.find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return clientY >= rect.top && clientY <= rect.bottom;
+    });
+    if (!bucket) {
+      bucket = buckets
+        .map((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          return {
+            node: candidate,
+            distance: Math.min(Math.abs(clientY - rect.top), Math.abs(clientY - rect.bottom)),
+          };
+        })
+        .sort((a, b) => a.distance - b.distance)[0]?.node;
+    }
+  }
+  if (!bucket) return null;
+  const rows = [...bucket.querySelectorAll("[data-sort-item]")].filter((row) => {
+    return row.dataset.sortItem !== checklistSortDragState?.itemId;
+  });
+  const beforeRow = rows.find((row) => {
+    const rect = row.getBoundingClientRect();
+    return clientY < rect.top + rect.height / 2;
+  });
+  if (beforeRow) {
+    return {
+      stageKey: bucket.dataset.sortStageBucket,
+      targetItemId: beforeRow.dataset.sortItem,
+      afterTarget: false,
+    };
+  }
+  const lastRow = rows[rows.length - 1];
+  return {
+    stageKey: bucket.dataset.sortStageBucket,
+    targetItemId: lastRow?.dataset.sortItem || "",
+    afterTarget: Boolean(lastRow),
+  };
+}
+
+function autoScrollChecklistSort(clientY) {
+  const edgeSize = 96;
+  const step = 18;
+  if (clientY < edgeSize) {
+    window.scrollBy(0, -step);
+  } else if (clientY > window.innerHeight - edgeSize) {
+    window.scrollBy(0, step);
+  }
+}
+
+function moveSortItemToPointer(clientX, clientY) {
+  if (!checklistSortDragState) return false;
+  autoScrollChecklistSort(clientY);
+  const target = findChecklistSortDropTarget(clientX, clientY);
+  if (!target) return false;
+  const moved = moveSortItemToPosition(
+    checklistSortDragState.itemId,
+    target.stageKey,
+    target.targetItemId,
+    target.afterTarget,
+  );
+  if (moved) markChecklistSortDraggingRow(checklistSortDragState.itemId);
+  return moved;
 }
 
 function cleanupChecklistSortDrag() {
@@ -1963,18 +2078,7 @@ function cleanupChecklistSortDrag() {
 
 function finishChecklistSortDrag(clientX, clientY) {
   if (!checklistSortDragState) return;
-  const { itemId } = checklistSortDragState;
-  const target = document.elementFromPoint(clientX, clientY);
-  const targetRow = target?.closest?.("[data-sort-item]");
-  const targetBucket = target?.closest?.("[data-sort-stage-bucket]");
-  if (targetRow && targetRow.dataset.sortItem !== itemId) {
-    const rect = targetRow.getBoundingClientRect();
-    const afterTarget = clientY > rect.top + rect.height / 2;
-    const bucket = targetRow.closest("[data-sort-stage-bucket]");
-    moveSortItemToPosition(itemId, bucket.dataset.sortStageBucket, targetRow.dataset.sortItem, afterTarget);
-  } else if (targetBucket) {
-    moveSortItemToPosition(itemId, targetBucket.dataset.sortStageBucket);
-  }
+  moveSortItemToPointer(clientX, clientY);
   cleanupChecklistSortDrag();
 }
 
@@ -2255,11 +2359,7 @@ function makeCustomDecision({
     status,
     options: options.length
       ? options
-      : [
-          { name: "方案 A", notes: { "预算/成本": "待补充", "体验/价值": "待补充", "风险/执行": "待补充" } },
-          { name: "方案 B", notes: { "预算/成本": "待补充", "体验/价值": "待补充", "风险/执行": "待补充" } },
-          { name: "方案 C", notes: { "预算/成本": "待补充", "体验/价值": "待补充", "风险/执行": "待补充" } },
-        ],
+      : defaultDecisionOptions(),
     criteria,
     gaps,
     finalChoice,
@@ -2284,6 +2384,65 @@ function renderDecisionLinkedTaskOptions(decision, nodeId) {
         `)
         .join("")
     : `<p class="subtle">这个节点暂无任务，先在节点里添加任务后再关联。</p>`;
+  updateDecisionLinkedTaskSummary();
+}
+
+function decisionLinkedTaskIdsFromForm() {
+  return [...document.querySelectorAll("#decisionLinkedTaskCheckboxes input[name='linkedTaskIds']:checked")]
+    .map((input) => input.value);
+}
+
+function updateDecisionLinkedTaskSummary() {
+  const summary = document.getElementById("decisionLinkedTaskSummary");
+  const panel = document.getElementById("decisionLinkedTasksPanel");
+  const toggle = document.getElementById("toggleDecisionLinkedTasksBtn");
+  const linkedIds = decisionLinkedTaskIdsFromForm();
+  const linkedTaskNames = linkedIds
+    .map((taskId) => taskById(taskId)?.title)
+    .filter(Boolean);
+  summary.textContent = linkedTaskNames.length
+    ? `已关联 ${linkedTaskNames.length} 个任务：${linkedTaskNames.slice(0, 3).join("、")}${linkedTaskNames.length > 3 ? "…" : ""}`
+    : "未关联任务";
+  const expanded = Boolean(decisionDialogState?.linkedTasksExpanded);
+  panel.hidden = !expanded;
+  toggle.textContent = expanded ? "收起关联任务" : "勾选关联任务";
+  toggle.setAttribute("aria-expanded", String(expanded));
+}
+
+function syncDecisionComparisonControls() {
+  const isView = decisionDialogState?.mode === "view";
+  const optionCount = document.querySelectorAll("#decisionComparisonEditor [data-decision-option-index]").length;
+  const addButton = document.getElementById("addDecisionOptionBtn");
+  addButton.style.display = isView ? "none" : "";
+  addButton.disabled = isView || optionCount >= MAX_DECISION_OPTIONS;
+  document.querySelectorAll("[data-remove-decision-option]").forEach((button) => {
+    button.style.display = isView ? "none" : "";
+    button.disabled = isView || optionCount <= 1;
+  });
+}
+
+function addDecisionOption() {
+  if (decisionDialogState?.mode === "view") return;
+  const comparison = readDecisionComparisonEditor();
+  if (comparison.options.length >= MAX_DECISION_OPTIONS) return;
+  comparison.options.push({
+    name: `方案 ${comparison.options.length + 1}`,
+    notes: DEFAULT_COMPARISON_CRITERIA.reduce((notes, criterion) => {
+      notes[criterion] = "";
+      return notes;
+    }, {}),
+  });
+  renderDecisionComparisonEditor(comparison);
+  syncDecisionComparisonControls();
+}
+
+function removeDecisionOption(optionIndex) {
+  if (decisionDialogState?.mode === "view") return;
+  const comparison = readDecisionComparisonEditor();
+  if (comparison.options.length <= 1) return;
+  comparison.options.splice(optionIndex, 1);
+  renderDecisionComparisonEditor(comparison);
+  syncDecisionComparisonControls();
 }
 
 function setDecisionDialogMode(mode) {
@@ -2299,6 +2458,8 @@ function setDecisionDialogMode(mode) {
   form.querySelectorAll("input, textarea, select").forEach((control) => {
     control.disabled = isView;
   });
+  syncDecisionComparisonControls();
+  updateDecisionLinkedTaskSummary();
 }
 
 function openDecisionDialog({ mode = "create", decisionId = "", nodeId = selectedNodeId } = {}) {
@@ -2316,7 +2477,7 @@ function openDecisionDialog({ mode = "create", decisionId = "", nodeId = selecte
     options: [],
     linkedTaskIds: [],
   });
-  decisionDialogState = { mode, decisionId: decision?.id || "", dirty: false };
+  decisionDialogState = { mode, decisionId: decision?.id || "", dirty: false, linkedTasksExpanded: false };
   form.reset();
   form.elements.decisionId.value = decision?.id || "";
   form.elements.nodeId.innerHTML = enabledNodes()
@@ -2335,7 +2496,7 @@ function openDecisionDialog({ mode = "create", decisionId = "", nodeId = selecte
   form.elements.finalChoice.value = source.finalChoice || "";
   form.elements.conclusion.value = source.conclusion || "";
   form.elements.gapsText.value = (source.gaps || []).join("\n");
-  form.elements.comparisonText.value = serializeDecisionComparison(source);
+  renderDecisionComparisonEditor(source);
   renderDecisionLinkedTaskOptions(source, source.nodeId || nodeId);
   setDecisionDialogMode(mode);
   dialog.showModal();
@@ -2343,7 +2504,7 @@ function openDecisionDialog({ mode = "create", decisionId = "", nodeId = selecte
 
 function readDecisionDialogPayload() {
   const form = document.getElementById("decisionDialogForm");
-  const comparison = parseDecisionComparison(form.elements.comparisonText.value);
+  const comparison = readDecisionComparisonEditor();
   return {
     nodeId: form.elements.nodeId.value,
     title: form.elements.title.value,
@@ -2362,7 +2523,7 @@ function readDecisionDialogPayload() {
       .filter(Boolean),
     options: comparison.options,
     criteria: comparison.criteria,
-    linkedTaskIds: [...form.querySelectorAll("input[name='linkedTaskIds']:checked")].map((input) => input.value),
+    linkedTaskIds: decisionLinkedTaskIdsFromForm(),
   };
 }
 
@@ -2684,6 +2845,22 @@ document.getElementById("decisionDialogNodeSelect").addEventListener("change", (
   renderDecisionLinkedTaskOptions(decision, event.target.value);
 });
 
+document.getElementById("addDecisionOptionBtn").addEventListener("click", addDecisionOption);
+
+document.getElementById("decisionComparisonEditor").addEventListener("click", (event) => {
+  const removeButton = event.target.closest("[data-remove-decision-option]");
+  if (!removeButton) return;
+  removeDecisionOption(Number(removeButton.dataset.removeDecisionOption));
+});
+
+document.getElementById("toggleDecisionLinkedTasksBtn").addEventListener("click", () => {
+  if (!decisionDialogState) return;
+  decisionDialogState.linkedTasksExpanded = !decisionDialogState.linkedTasksExpanded;
+  updateDecisionLinkedTaskSummary();
+});
+
+document.getElementById("decisionLinkedTaskCheckboxes").addEventListener("change", updateDecisionLinkedTaskSummary);
+
 document.getElementById("decisionDialogForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const value = event.submitter?.value;
@@ -2830,7 +3007,12 @@ document.getElementById("checklistContent").addEventListener("pointerdown", (eve
   };
   row?.classList.add("dragging");
   document.body.classList.add("is-sorting-drag");
-  handle.setPointerCapture?.(event.pointerId);
+});
+
+document.addEventListener("pointermove", (event) => {
+  if (!checklistSortDragState) return;
+  event.preventDefault();
+  moveSortItemToPointer(event.clientX, event.clientY);
 });
 
 document.addEventListener("pointerup", (event) => {
@@ -2846,11 +3028,13 @@ document.getElementById("checklistContent").addEventListener("dragstart", (event
   checklistSortDragState = { itemId: row.dataset.sortItem };
   event.dataTransfer?.setData("text/plain", row.dataset.sortItem);
   row.classList.add("dragging");
+  document.body.classList.add("is-sorting-drag");
 });
 
 document.getElementById("checklistContent").addEventListener("dragover", (event) => {
   if (!checklistSortDragState) return;
   event.preventDefault();
+  moveSortItemToPointer(event.clientX, event.clientY);
 });
 
 document.getElementById("checklistContent").addEventListener("drop", (event) => {
@@ -2858,6 +3042,8 @@ document.getElementById("checklistContent").addEventListener("drop", (event) => 
   event.preventDefault();
   finishChecklistSortDrag(event.clientX, event.clientY);
 });
+
+document.getElementById("checklistContent").addEventListener("dragend", cleanupChecklistSortDrag);
 
 document.getElementById("checklistItemForm").addEventListener("input", scheduleChecklistDraftSave);
 document.getElementById("checklistItemForm").addEventListener("change", scheduleChecklistDraftSave);

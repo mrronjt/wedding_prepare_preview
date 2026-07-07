@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>喜事计划舱</title>
-    <link rel="stylesheet" href="styles.css?v=20260707-p0-review" />
+    <link rel="stylesheet" href="styles.css?v=20260708-decision-drag" />
   </head>
   <body>
     <div class="app-shell">
@@ -332,15 +332,24 @@
           信息缺口
           <textarea name="gapsText" rows="3" placeholder="每行一个信息缺口"></textarea>
         </label>
-        <label>
-          方案对比
-          <textarea name="comparisonText" rows="5" placeholder="每行一个方案：方案名 | 预算/成本 | 体验/价值 | 风险/执行"></textarea>
-        </label>
-        <fieldset class="owner-checkboxes">
-          <legend>关联任务</legend>
-          <p class="subtle">同一个任务可以关联到多个决策 item。</p>
-          <div id="decisionLinkedTaskCheckboxes"></div>
-        </fieldset>
+        <section class="decision-form-section">
+          <div class="section-heading">
+            <span>方案对比</span>
+            <button class="text-button" id="addDecisionOptionBtn" type="button">添加方案</button>
+          </div>
+          <div class="decision-option-list" id="decisionComparisonEditor"></div>
+        </section>
+        <section class="decision-form-section">
+          <div class="section-heading">
+            <span>关联任务</span>
+            <button class="ghost-button" id="toggleDecisionLinkedTasksBtn" type="button" aria-expanded="false">勾选关联任务</button>
+          </div>
+          <p class="subtle" id="decisionLinkedTaskSummary">未关联任务</p>
+          <div class="owner-checkboxes decision-linked-task-panel" id="decisionLinkedTasksPanel" hidden>
+            <p class="subtle">可多选任务；同一个任务也可以被其他决策 item 重复关联。</p>
+            <div id="decisionLinkedTaskCheckboxes"></div>
+          </div>
+        </section>
         <div class="dialog-actions">
           <button class="ghost-button danger" id="deleteDecisionBtn" value="delete" type="submit" formnovalidate>删除</button>
           <span></span>
@@ -456,8 +465,8 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="executionChecklistCore.js?v=20260707-p0-review"></script>
-    <script src="config/execution-checklist-recommendations.js?v=20260707-p0-review"></script>
-    <script src="app.js?v=20260707-p0-review"></script>
+    <script src="executionChecklistCore.js?v=20260708-decision-drag"></script>
+    <script src="config/execution-checklist-recommendations.js?v=20260708-decision-drag"></script>
+    <script src="app.js?v=20260708-decision-drag"></script>
   </body>
 </html>
