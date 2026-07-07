@@ -12,6 +12,7 @@ const OPEN_DECISION_STATUSES = ["信息收集中", "对比中", "待拍板", "�
 const DONE_DECISION_STATUSES = ["已转任务", "暂缓"];
 const DEFAULT_COMPARISON_CRITERIA = ["预算/成本", "体验/价值", "风险/执行"];
 const MAX_DECISION_OPTIONS = 5;
+const MAX_DECISION_CRITERIA = 8;
 
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -900,51 +901,67 @@ function normalizedDecisionComparison(decision = {}) {
 
 function renderDecisionComparisonEditor(decision) {
   const container = document.getElementById("decisionComparisonEditor");
-  const addButton = document.getElementById("addDecisionOptionBtn");
   const { criteria, options } = normalizedDecisionComparison(decision);
-  container.innerHTML = options
+  const optionColumns = options
     .map((option, optionIndex) => `
-      <article class="decision-option-editor" data-decision-option-index="${optionIndex}">
-        <div class="decision-option-header">
-          <label>
-            方案名称
-            <input data-decision-option-name value="${escapeAttribute(option.name)}" placeholder="例如：户外仪式 + 室内晚宴" autocomplete="off" />
-          </label>
-          <button class="icon-button danger" data-remove-decision-option="${optionIndex}" type="button" aria-label="删除方案">×</button>
-        </div>
-        <div class="decision-criteria-grid">
-          ${criteria
-            .map((criterion) => `
-              <label>
-                ${escapeHTML(criterion)}
-                <textarea data-decision-criterion="${escapeAttribute(criterion)}" rows="2" placeholder="填写这个方案的判断依据">${escapeHTML(option.notes?.[criterion] || "")}</textarea>
-              </label>
-            `)
-            .join("")}
-        </div>
-      </article>
+      <div class="decision-compare-cell decision-compare-head" data-decision-option-index="${optionIndex}">
+        <input data-decision-option-name value="${escapeAttribute(option.name)}" placeholder="方案名称" autocomplete="off" />
+        <button class="icon-button danger" data-remove-decision-option="${optionIndex}" type="button" aria-label="删除方案">×</button>
+      </div>
     `)
     .join("");
-  addButton.disabled = options.length >= MAX_DECISION_OPTIONS;
+  const rows = criteria
+    .map((criterion, criterionIndex) => `
+      <div class="decision-compare-row" data-decision-criterion-index="${criterionIndex}">
+        <div class="decision-compare-cell decision-compare-criterion">
+          <input data-decision-criterion-name value="${escapeAttribute(criterion)}" placeholder="对比项，例如：预算/成本" autocomplete="off" />
+          <button class="icon-button danger" data-remove-decision-criterion="${criterionIndex}" type="button" aria-label="删除对比项">×</button>
+        </div>
+        ${options
+          .map((option, optionIndex) => `
+            <div class="decision-compare-cell">
+              <textarea data-decision-comparison-value data-option-index="${optionIndex}" data-criterion-index="${criterionIndex}" rows="3" placeholder="填写纯文字说明">${escapeHTML(option.notes?.[criterion] || "")}</textarea>
+            </div>
+          `)
+          .join("")}
+      </div>
+    `)
+    .join("");
+  container.innerHTML = `
+    <div class="decision-compare-table" style="--decision-option-count: ${options.length}">
+      <div class="decision-compare-row decision-compare-header">
+        <div class="decision-compare-cell decision-compare-corner">对比项</div>
+        ${optionColumns}
+      </div>
+      ${rows}
+    </div>
+  `;
 }
 
 function readDecisionComparisonEditor() {
-  const criteria = [...DEFAULT_COMPARISON_CRITERIA];
+  const criterionInputs = [...document.querySelectorAll("#decisionComparisonEditor [data-decision-criterion-name]")]
+    .slice(0, MAX_DECISION_CRITERIA);
+  const seenCriteria = new Map();
+  const criteria = criterionInputs.map((input, index) => {
+    const baseName = input.value.trim() || `对比项 ${index + 1}`;
+    const count = seenCriteria.get(baseName) || 0;
+    seenCriteria.set(baseName, count + 1);
+    return count ? `${baseName} ${count + 1}` : baseName;
+  });
   const options = [...document.querySelectorAll("#decisionComparisonEditor [data-decision-option-index]")]
-    .map((node, index) => {
-      const name = node.querySelector("[data-decision-option-name]")?.value.trim() || `方案 ${index + 1}`;
+    .slice(0, MAX_DECISION_OPTIONS)
+    .map((node, optionIndex) => {
+      const name = node.querySelector("[data-decision-option-name]")?.value.trim() || `方案 ${optionIndex + 1}`;
       const notes = {};
-      criteria.forEach((criterion) => {
-        const control = [...node.querySelectorAll("[data-decision-criterion]")]
-          .find((item) => item.dataset.decisionCriterion === criterion);
+      criteria.forEach((criterion, criterionIndex) => {
+        const control = [...document.querySelectorAll("#decisionComparisonEditor [data-decision-comparison-value]")]
+          .find((item) => Number(item.dataset.optionIndex) === optionIndex && Number(item.dataset.criterionIndex) === criterionIndex);
         notes[criterion] = control?.value.trim() || "";
       });
       return { name, notes };
-    })
-    .filter((option) => option.name || Object.values(option.notes).some(Boolean))
-    .slice(0, MAX_DECISION_OPTIONS);
+    });
   return {
-    criteria,
+    criteria: criteria.length ? criteria : [...DEFAULT_COMPARISON_CRITERIA],
     options: options.length ? options : defaultDecisionOptions(),
   };
 }
@@ -2412,12 +2429,20 @@ function updateDecisionLinkedTaskSummary() {
 function syncDecisionComparisonControls() {
   const isView = decisionDialogState?.mode === "view";
   const optionCount = document.querySelectorAll("#decisionComparisonEditor [data-decision-option-index]").length;
+  const criterionCount = document.querySelectorAll("#decisionComparisonEditor [data-decision-criterion-index]").length;
   const addButton = document.getElementById("addDecisionOptionBtn");
+  const addCriterionButton = document.getElementById("addDecisionCriterionBtn");
   addButton.style.display = isView ? "none" : "";
   addButton.disabled = isView || optionCount >= MAX_DECISION_OPTIONS;
+  addCriterionButton.style.display = isView ? "none" : "";
+  addCriterionButton.disabled = isView || criterionCount >= MAX_DECISION_CRITERIA;
   document.querySelectorAll("[data-remove-decision-option]").forEach((button) => {
     button.style.display = isView ? "none" : "";
     button.disabled = isView || optionCount <= 1;
+  });
+  document.querySelectorAll("[data-remove-decision-criterion]").forEach((button) => {
+    button.style.display = isView ? "none" : "";
+    button.disabled = isView || criterionCount <= 1;
   });
 }
 
@@ -2427,7 +2452,7 @@ function addDecisionOption() {
   if (comparison.options.length >= MAX_DECISION_OPTIONS) return;
   comparison.options.push({
     name: `方案 ${comparison.options.length + 1}`,
-    notes: DEFAULT_COMPARISON_CRITERIA.reduce((notes, criterion) => {
+    notes: comparison.criteria.reduce((notes, criterion) => {
       notes[criterion] = "";
       return notes;
     }, {}),
@@ -2441,6 +2466,31 @@ function removeDecisionOption(optionIndex) {
   const comparison = readDecisionComparisonEditor();
   if (comparison.options.length <= 1) return;
   comparison.options.splice(optionIndex, 1);
+  renderDecisionComparisonEditor(comparison);
+  syncDecisionComparisonControls();
+}
+
+function addDecisionCriterion() {
+  if (decisionDialogState?.mode === "view") return;
+  const comparison = readDecisionComparisonEditor();
+  if (comparison.criteria.length >= MAX_DECISION_CRITERIA) return;
+  const nextCriterion = `对比项 ${comparison.criteria.length + 1}`;
+  comparison.criteria.push(nextCriterion);
+  comparison.options.forEach((option) => {
+    option.notes[nextCriterion] = "";
+  });
+  renderDecisionComparisonEditor(comparison);
+  syncDecisionComparisonControls();
+}
+
+function removeDecisionCriterion(criterionIndex) {
+  if (decisionDialogState?.mode === "view") return;
+  const comparison = readDecisionComparisonEditor();
+  if (comparison.criteria.length <= 1) return;
+  const [removedCriterion] = comparison.criteria.splice(criterionIndex, 1);
+  comparison.options.forEach((option) => {
+    delete option.notes[removedCriterion];
+  });
   renderDecisionComparisonEditor(comparison);
   syncDecisionComparisonControls();
 }
@@ -2847,10 +2897,18 @@ document.getElementById("decisionDialogNodeSelect").addEventListener("change", (
 
 document.getElementById("addDecisionOptionBtn").addEventListener("click", addDecisionOption);
 
+document.getElementById("addDecisionCriterionBtn").addEventListener("click", addDecisionCriterion);
+
 document.getElementById("decisionComparisonEditor").addEventListener("click", (event) => {
   const removeButton = event.target.closest("[data-remove-decision-option]");
-  if (!removeButton) return;
-  removeDecisionOption(Number(removeButton.dataset.removeDecisionOption));
+  if (removeButton) {
+    removeDecisionOption(Number(removeButton.dataset.removeDecisionOption));
+    return;
+  }
+  const removeCriterionButton = event.target.closest("[data-remove-decision-criterion]");
+  if (removeCriterionButton) {
+    removeDecisionCriterion(Number(removeCriterionButton.dataset.removeDecisionCriterion));
+  }
 });
 
 document.getElementById("toggleDecisionLinkedTasksBtn").addEventListener("click", () => {

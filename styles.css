@@ -181,31 +181,80 @@ textarea {
   gap: 10px;
 }
 
-.decision-option-list {
-  display: grid;
+.mini-actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
+  justify-content: flex-end;
 }
 
-.decision-option-editor {
-  display: grid;
-  gap: 10px;
+.decision-option-list {
+  overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
+  background: #fff;
+}
+
+.decision-compare-table {
+  display: grid;
+  min-width: max(680px, calc(180px + var(--decision-option-count) * 190px));
+}
+
+.decision-compare-row {
+  display: grid;
+  grid-template-columns: 180px repeat(var(--decision-option-count), minmax(180px, 1fr));
+  min-height: 94px;
+  border-top: 1px solid var(--line);
+}
+
+.decision-compare-row:first-child {
+  border-top: 0;
+}
+
+.decision-compare-cell {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.decision-compare-cell:first-child {
+  border-left: 0;
+}
+
+.decision-compare-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 72px;
   background: var(--surface-strong);
-  padding: 10px;
 }
 
-.decision-option-header {
-  display: grid;
+.decision-compare-corner,
+.decision-compare-criterion {
+  background: var(--surface-strong);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.decision-compare-head {
   grid-template-columns: 1fr auto;
-  gap: 8px;
-  align-items: end;
+  align-items: start;
+  background: #fff;
 }
 
-.decision-criteria-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+.decision-compare-head input,
+.decision-compare-criterion input {
+  font-weight: 850;
+}
+
+.decision-compare-cell textarea {
+  min-height: 68px;
+  border-color: transparent;
+  background: var(--surface-strong);
 }
 
 .decision-linked-task-panel[hidden] {

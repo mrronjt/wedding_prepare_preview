@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>喜事计划舱</title>
-    <link rel="stylesheet" href="styles.css?v=20260708-decision-drag" />
+    <link rel="stylesheet" href="styles.css?v=20260708-compare-table" />
   </head>
   <body>
     <div class="app-shell">
@@ -335,7 +335,10 @@
         <section class="decision-form-section">
           <div class="section-heading">
             <span>方案对比</span>
-            <button class="text-button" id="addDecisionOptionBtn" type="button">添加方案</button>
+            <div class="mini-actions">
+              <button class="text-button" id="addDecisionCriterionBtn" type="button">添加对比项</button>
+              <button class="text-button" id="addDecisionOptionBtn" type="button">添加方案</button>
+            </div>
           </div>
           <div class="decision-option-list" id="decisionComparisonEditor"></div>
         </section>
@@ -465,8 +468,8 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="executionChecklistCore.js?v=20260708-decision-drag"></script>
-    <script src="config/execution-checklist-recommendations.js?v=20260708-decision-drag"></script>
-    <script src="app.js?v=20260708-decision-drag"></script>
+    <script src="executionChecklistCore.js?v=20260708-compare-table"></script>
+    <script src="config/execution-checklist-recommendations.js?v=20260708-compare-table"></script>
+    <script src="app.js?v=20260708-compare-table"></script>
   </body>
 </html>
