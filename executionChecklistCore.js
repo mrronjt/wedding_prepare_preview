@@ -416,10 +416,13 @@
     ensureExecutionChecklistState(project);
     const permissionError = requireEditor(project);
     if (permissionError) return permissionError;
-    const owner = activeOwners(project).find((item) => item.ownerId === ownerId);
-    if (!owner) return fail("ITEM_NOT_FOUND_OR_DELETED", "负责人不存在或已删除", { ownerId });
+    if (!activeOwners(project).some((item) => item.ownerId === ownerId)) {
+      return fail("ITEM_NOT_FOUND_OR_DELETED", "负责人不存在或已删除", { ownerId });
+    }
     const affectedTasks = (project.tasks || []).filter((task) => Array.isArray(task.ownerIds) && task.ownerIds.includes(ownerId));
     const affectedItems = activeItems(project).filter((item) => item.ownerIds.includes(ownerId));
+    const owner = project.projectOwners.find((item) => item.ownerId === ownerId && !item.deletedAt);
+    if (!owner) return fail("ITEM_NOT_FOUND_OR_DELETED", "负责人不存在或已删除", { ownerId });
     owner.deletedAt = nowIso();
     affectedTasks.forEach((task) => {
       task.ownerIds = task.ownerIds.filter((id) => id !== ownerId);

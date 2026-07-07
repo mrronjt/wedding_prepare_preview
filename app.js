@@ -10,6 +10,7 @@ const recommendationConfig = window.ExecutionChecklistRecommendationConfig;
 const DECISION_STATUSES = ["信息收集中", "对比中", "待拍板", "已决定", "已转任务", "暂缓"];
 const OPEN_DECISION_STATUSES = ["信息收集中", "对比中", "待拍板", "已决定"];
 const DONE_DECISION_STATUSES = ["已转任务", "暂缓"];
+const DEFAULT_COMPARISON_CRITERIA = ["预算/成本", "体验/价值", "风险/执行"];
 
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -606,13 +607,15 @@ let activeView = "map";
 let selectedNodeId = "lawn";
 let decisionFilter = "all";
 let activeTaskNodeId = selectedNodeId;
-let activeDecisionNodeId = selectedNodeId;
 let toastTimer = null;
 let checklistStatusFilter = "all";
 let checklistOwnerFilter = "all";
+let checklistStageFilter = "all";
 let checklistStatusSavingItemId = "";
 let checklistFormState = null;
 let checklistSortDraft = null;
+let checklistSortDragState = null;
+let decisionDialogState = null;
 let pendingConfirmResolver = null;
 const checklistDrafts = new Map();
 let checklistDraftTimer = null;
@@ -721,6 +724,7 @@ function makeDefaultState() {
       decisions.push({
         ...deepClone(decision),
         id: `${template.id}-decision-${decisionIndex}`,
+        linkedTaskIds: [],
         nodeId: template.id,
         outputGenerated: false,
       });
@@ -735,8 +739,31 @@ function makeDefaultState() {
     decisions,
     customNodeCount: 0,
   };
+  normalizeAppState(defaultState);
   checklistCore.ensureExecutionChecklistState(defaultState);
   return defaultState;
+}
+
+function normalizeAppState(project) {
+  project.tasks = Array.isArray(project.tasks) ? project.tasks : [];
+  project.decisions = Array.isArray(project.decisions) ? project.decisions : [];
+  project.decisions.forEach((decision) => {
+    decision.title = decision.title || "未命名决策";
+    decision.question = decision.question || "补充需要拍板的问题。";
+    decision.type = decision.type || "自定义";
+    decision.owner = decision.owner || "双方一起";
+    decision.participants = decision.participants || "新人";
+    decision.status = DECISION_STATUSES.includes(decision.status) ? decision.status : "信息收集中";
+    decision.options = Array.isArray(decision.options) ? decision.options : [];
+    decision.criteria = Array.isArray(decision.criteria) && decision.criteria.length ? decision.criteria : [...DEFAULT_COMPARISON_CRITERIA];
+    decision.gaps = Array.isArray(decision.gaps) ? decision.gaps : [];
+    decision.finalChoice = decision.finalChoice || "";
+    decision.conclusion = decision.conclusion || "";
+    decision.followUps = Array.isArray(decision.followUps) ? decision.followUps : [];
+    decision.linkedTaskIds = Array.isArray(decision.linkedTaskIds) ? decision.linkedTaskIds : [];
+    decision.outputGenerated = Boolean(decision.outputGenerated || decision.status === "已转任务");
+  });
+  return project;
 }
 
 function loadState() {
@@ -745,6 +772,7 @@ function loadState() {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed.version >= 2) {
+        normalizeAppState(parsed);
         checklistCore.ensureExecutionChecklistState(parsed);
         return parsed;
       }
@@ -756,6 +784,7 @@ function loadState() {
 }
 
 function saveState() {
+  normalizeAppState(state);
   checklistCore.ensureExecutionChecklistState(state);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
@@ -809,6 +838,16 @@ function nodeDecisions(nodeId) {
   return state.decisions.filter((decision) => decision.nodeId === nodeId);
 }
 
+function taskById(taskId) {
+  return state.tasks.find((task) => task.id === taskId);
+}
+
+function linkedTasksForDecision(decision) {
+  return (decision.linkedTaskIds || [])
+    .map(taskById)
+    .filter(Boolean);
+}
+
 function taskDueDate(task) {
   if (Number.isFinite(task.dueOffset)) {
     return isoDate(addDays(new Date(state.profile.date), task.dueOffset));
@@ -821,6 +860,53 @@ function decisionDueDate(decision) {
     return isoDate(addDays(new Date(state.profile.date), decision.dueOffset));
   }
   return decision.dueDate;
+}
+
+function decisionDueDateForForm(decision) {
+  return decisionDueDate(decision) || isoDate(addDays(new Date(), 7));
+}
+
+function decisionStatusOptions(selectedStatus) {
+  return DECISION_STATUSES
+    .map((status) => `<option value="${escapeAttribute(status)}" ${selectedStatus === status ? "selected" : ""}>${escapeHTML(status)}</option>`)
+    .join("");
+}
+
+function serializeDecisionComparison(decision) {
+  const criteria = decision.criteria?.length ? decision.criteria : DEFAULT_COMPARISON_CRITERIA;
+  const options = decision.options?.length
+    ? decision.options
+    : [
+        { name: "方案 A", notes: {} },
+        { name: "方案 B", notes: {} },
+        { name: "方案 C", notes: {} },
+      ];
+  return options
+    .map((option) => [option.name, ...criteria.map((criterion) => option.notes?.[criterion] || "")].join(" | "))
+    .join("\n");
+}
+
+function parseDecisionComparison(text) {
+  const criteria = [...DEFAULT_COMPARISON_CRITERIA];
+  const options = String(text || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const [name, ...values] = line.split(/\s*[|｜]\s*/);
+      const notes = {};
+      criteria.forEach((criterion, criterionIndex) => {
+        notes[criterion] = values[criterionIndex] || "待补充";
+      });
+      return {
+        name: name || `方案 ${index + 1}`,
+        notes,
+      };
+    });
+  return {
+    criteria,
+    options: options.length ? options.slice(0, 3) : [],
+  };
 }
 
 function overdueTasks() {
@@ -1004,8 +1090,14 @@ function renderNodeSelectors() {
     .map((node) => `<option value="${node.id}" ${node.id === selectedNodeId ? "selected" : ""}>${escapeHTML(node.name)}</option>`)
     .join("");
   document.getElementById("nodeSelect").innerHTML = options;
-  document.getElementById("decisionNodeSelect").innerHTML = options;
-  const decisionOwnerSelect = document.querySelector("#decisionForm select[name='owner']");
+  const decisionDialogNodeSelect = document.getElementById("decisionDialogNodeSelect");
+  if (decisionDialogNodeSelect && !decisionDialogNodeSelect.matches(":focus")) {
+    const current = decisionDialogNodeSelect.value || selectedNodeId;
+    decisionDialogNodeSelect.innerHTML = enabledNodes()
+      .map((node) => `<option value="${node.id}" ${node.id === current ? "selected" : ""}>${escapeHTML(node.name)}</option>`)
+      .join("");
+  }
+  const decisionOwnerSelect = document.querySelector("#decisionDialogForm select[name='owner']");
   if (decisionOwnerSelect && !decisionOwnerSelect.matches(":focus")) {
     const current = decisionOwnerSelect.value || "双方一起";
     decisionOwnerSelect.innerHTML = ownerNameOptions(current);
@@ -1082,7 +1174,7 @@ function renderNodeDecisions(nodeId) {
   const decisions = nodeDecisions(nodeId);
   list.innerHTML = decisions.length
     ? decisions
-        .map((decision) => renderDecisionCard(decision, "node"))
+        .map((decision) => renderDecisionSummaryCard(decision, "node"))
         .join("")
     : `<p class="subtle">这个节点还没有决策 item。</p>`;
 }
@@ -1096,13 +1188,13 @@ function renderNodeOutputs(nodeId) {
           <article class="output-row">
             <div>
               <p class="row-title">${escapeHTML(output.text)}</p>
-              <p class="row-meta">${output.sourceDecisionId ? "来自决策输出" : "模板输出"}</p>
+              <p class="row-meta">${output.sourceDecisionId ? "来自决策生成" : "模板素材"}</p>
             </div>
-            <span class="badge ready">执行包</span>
+            <span class="badge ready">执行包素材</span>
           </article>
         `)
         .join("")
-    : `<p class="subtle">完成决策后会自动输出到这里。</p>`;
+    : `<p class="subtle">这里会展示自动汇总到执行包的节点素材；决策生成后续任务后也会补充到这里。</p>`;
 }
 
 function decisionMatchesFilter(decision) {
@@ -1125,14 +1217,13 @@ function renderDecisionBoard() {
 
   board.innerHTML = decisions.length
     ? decisions
-        .map((decision) => renderDecisionCard(decision, "center"))
+        .map((decision) => renderDecisionSummaryCard(decision, "center"))
         .join("")
     : `<p class="subtle">当前筛选下没有决策 item。</p>`;
 }
 
-function renderDecisionCard(decision, context = "center") {
+function renderDecisionSummaryCard(decision, context = "center") {
   const view = makeDecisionViewModel(decision);
-  const table = renderComparisonTable(view);
   const joinedItem = checklistCore.findActiveItemBySource(state, {
     sourceType: "decision_item",
     sourceDecisionId: view.id,
@@ -1143,9 +1234,10 @@ function renderDecisionCard(decision, context = "center") {
       ? `<button class="ghost-button" data-decision-action="open-checklist-item" data-checklist-item-id="${joinedItem.id}" type="button">查看执行清单项</button>`
       : `<button class="ghost-button" data-decision-action="join-checklist" data-decision-id="${view.id}" type="button">加入执行清单</button>`
     : "";
-  const gaps = view.gaps.length
-    ? view.gaps.map((gap) => `<span class="badge risk">${escapeHTML(gap)}</span>`).join("")
-    : `<span class="badge ready">暂无信息缺口</span>`;
+  const linkedTaskText = view.linkedTaskCount ? `${view.linkedTaskCount} 个关联任务` : "未关联任务";
+  const outputButton = view.outputGenerated
+    ? `<button class="ghost-button" type="button" disabled>已生成后续任务</button>`
+    : `<button class="primary-button" data-decision-action="output" data-decision-id="${view.id}" type="button">生成后续任务</button>`;
 
   return `
     <article class="decision-card ${context === "node" ? "node-decision-card" : ""}" data-decision-id="${view.id}">
@@ -1155,44 +1247,18 @@ function renderDecisionCard(decision, context = "center") {
             <span class="badge">${escapeHTML(view.nodeName)}</span>
             <span class="badge">${escapeHTML(view.type)}</span>
             <span class="badge ${view.isOverdue ? "risk" : "progress"}">${view.dueDateLabel} · ${view.dueDistanceLabel}</span>
+            <span class="badge">${escapeHTML(linkedTaskText)}</span>
           </div>
           <h3>${escapeHTML(view.title)}</h3>
           <p>${escapeHTML(view.question)}</p>
         </div>
-        <select data-decision-input="status" data-decision-id="${view.id}" aria-label="决策状态">
-          ${DECISION_STATUSES.map((status) => `<option ${view.status === status ? "selected" : ""}>${status}</option>`).join("")}
-        </select>
-      </div>
-
-      <div class="decision-grid">
-        <section class="decision-box">
-          <div class="summary-line"><span>负责人</span><strong>${escapeHTML(view.owner)}</strong></div>
-          <div class="summary-line"><span>参与人</span><strong>${escapeHTML(view.participants)}</strong></div>
-          <div>
-            <p class="row-title">信息缺口</p>
-            <div class="node-meta">${gaps}</div>
-          </div>
-        </section>
-        <section>
-          ${table}
-        </section>
-      </div>
-
-      <div class="decision-result">
-        <label>
-          最终选择
-          <input data-decision-input="finalChoice" data-decision-id="${view.id}" value="${escapeAttribute(view.finalChoice)}" placeholder="例如：草坪仪式 + 室内晚宴" />
-        </label>
-        <label>
-          决策理由 / 交接备注
-          <input data-decision-input="conclusion" data-decision-id="${view.id}" value="${escapeAttribute(view.conclusion)}" placeholder="写清楚为什么这样选" />
-        </label>
+        <span class="badge ${DONE_DECISION_STATUSES.includes(view.status) ? "ready" : "decision"}">${escapeHTML(view.status)}</span>
       </div>
 
       <div class="decision-actions">
-        <button class="primary-button" data-decision-action="output" data-decision-id="${view.id}" type="button">
-          输出到节点
-        </button>
+        <button class="ghost-button" data-decision-action="open-detail" data-decision-id="${view.id}" type="button">查看</button>
+        <button class="ghost-button" data-decision-action="edit-detail" data-decision-id="${view.id}" type="button">编辑</button>
+        ${outputButton}
         ${joinChecklistButton}
         ${context === "center" ? `<button class="ghost-button" data-decision-action="open-node" data-target-node-id="${view.nodeId}" type="button">查看节点</button>` : ""}
         <button class="ghost-button danger" data-decision-action="delete" data-decision-id="${view.id}" type="button">删除</button>
@@ -1244,6 +1310,8 @@ function makeDecisionViewModel(decision) {
     gaps: decision.gaps || [],
     options: decision.options || [],
     criteria: decision.criteria || [],
+    linkedTaskCount: linkedTasksForDecision(decision).length,
+    outputGenerated: Boolean(decision.outputGenerated),
     dueDateLabel: formatDate(due),
     dueDistanceLabel: days >= 0 ? `${days} 天后` : `逾期 ${Math.abs(days)} 天`,
     isOverdue: days < 0,
@@ -1265,7 +1333,7 @@ function renderPackage() {
   renderPackageList("timelinePackage", timeline.map(({ node, item }) => `${node.name}: ${item}`));
   renderPackageList("ownerPackage", owners);
   renderPackageList("riskPackage", risks.length ? risks : ["暂无逾期风险，继续检查待拍板决策。"]);
-  renderPackageList("decisionPackage", decisionOutputs.length ? decisionOutputs : ["还没有决策结果输出到执行包。"]);
+  renderPackageList("decisionPackage", decisionOutputs.length ? decisionOutputs : ["还没有决策生成的执行包素材。"]);
 }
 
 function collectOwnerHandoff() {
@@ -1294,7 +1362,7 @@ function stageLabel(stageKey) {
 }
 
 function isChecklistFiltered() {
-  return checklistStatusFilter !== "all" || checklistOwnerFilter !== "all";
+  return checklistStatusFilter !== "all" || checklistOwnerFilter !== "all" || checklistStageFilter !== "all";
 }
 
 function canEditProject() {
@@ -1378,6 +1446,7 @@ function renderChecklist() {
     button.classList.toggle("active", button.dataset.checklistStatusFilter === checklistStatusFilter);
   });
   renderChecklistOwnerFilter();
+  renderChecklistStageFilter();
   renderChecklistSortActions();
 
   if (checklistSortDraft) {
@@ -1404,7 +1473,8 @@ function renderChecklist() {
       checklistOwnerFilter === "all" ||
       (checklistOwnerFilter === "unassigned" && item.ownerIds.length === 0) ||
       item.ownerIds.includes(checklistOwnerFilter);
-    return statusMatch && ownerMatch;
+    const stageMatch = checklistStageFilter === "all" || item.stageKey === checklistStageFilter;
+    return statusMatch && ownerMatch && stageMatch;
   });
 
   const stagesToRender = checklistCore.STAGES
@@ -1430,6 +1500,17 @@ function renderChecklistOwnerFilter() {
   ];
   select.innerHTML = options.join("");
   select.value = checklistOwnerFilter;
+}
+
+function renderChecklistStageFilter() {
+  const select = document.getElementById("checklistStageFilter");
+  const validStageFilters = new Set(["all", ...checklistCore.STAGES.map((stage) => stage.stageKey)]);
+  if (!validStageFilters.has(checklistStageFilter)) checklistStageFilter = "all";
+  select.innerHTML = [
+    `<option value="all">所有执行阶段</option>`,
+    ...checklistCore.STAGES.map((stage) => `<option value="${stage.stageKey}">${escapeHTML(stage.label)}</option>`),
+  ].join("");
+  select.value = checklistStageFilter;
 }
 
 function renderChecklistSortActions() {
@@ -1497,18 +1578,11 @@ function renderChecklistSortDraft() {
               const item = itemById.get(itemId);
               if (!item) return "";
               return `
-                <article class="checklist-item-row">
+                <article class="checklist-item-row sortable-checklist-row" data-sort-item="${item.id}" draggable="true">
                   <div class="checklist-row-main">
-                    <span class="badge">拖拽手柄</span>
+                    <button class="drag-handle" data-sort-handle data-sort-drag="${item.id}" type="button" aria-label="拖动排序">拖动</button>
                     <p class="row-title">${escapeHTML(item.content)}</p>
                     <p class="row-meta">${escapeHTML(ownerNameFromIds(item.ownerIds))}${item.timeText ? ` · ${escapeHTML(item.timeText)}` : ""}</p>
-                  </div>
-                  <div class="sort-controls">
-                    <button class="ghost-button" data-sort-move="${item.id}" data-direction="up" type="button" ${index === 0 ? "disabled" : ""}>上移</button>
-                    <button class="ghost-button" data-sort-move="${item.id}" data-direction="down" type="button" ${index === stage.itemIds.length - 1 ? "disabled" : ""}>下移</button>
-                    <select data-sort-stage="${item.id}" aria-label="移动到阶段">
-                      ${checklistCore.STAGES.map((targetStage) => `<option value="${targetStage.stageKey}" ${targetStage.stageKey === stage.stageKey ? "selected" : ""}>${escapeHTML(targetStage.label)}</option>`).join("")}
-                    </select>
                   </div>
                 </article>
               `;
@@ -1523,17 +1597,17 @@ function renderChecklistSortDraft() {
               <p class="row-meta">${stage.itemIds.length} 项</p>
             </div>
           </div>
-          <div class="checklist-content">${rows}</div>
+          <div class="checklist-content sort-drop-zone" data-sort-stage-bucket="${stage.stageKey}">${rows}</div>
         </section>
       `;
     })
     .join("");
 }
 
-function openChecklistItemFromButton(itemId) {
+function openChecklistItemFromButton(itemId, mode = "view") {
   activeView = "checklist";
   renderAll();
-  openChecklistItemForm({ mode: "edit", itemId });
+  openChecklistItemForm({ mode, itemId });
 }
 
 function renderChecklistFormOptions(selectedStageKey, selectedOwnerIds) {
@@ -1567,7 +1641,7 @@ async function openChecklistItemForm({ mode, itemId = "", stageKey = "ungrouped"
       status: "待确认",
     };
 
-  if (checklistDrafts.has(draftKey)) {
+  if (mode !== "view" && checklistDrafts.has(draftKey)) {
     const restore = await askConfirm({
       title: "恢复草稿",
       message: "发现未保存内容，是否恢复？",
@@ -1588,8 +1662,13 @@ async function openChecklistItemForm({ mode, itemId = "", stageKey = "ungrouped"
   form.reset();
   clearChecklistFormErrors();
   document.getElementById("checklistDialogTitle").textContent = mode === "edit" ? "编辑执行项" : "新增执行项";
+  if (mode === "view") document.getElementById("checklistDialogTitle").textContent = "查看执行项";
   document.getElementById("deleteChecklistItemBtn").style.visibility = mode === "edit" ? "visible" : "hidden";
-  sourceHint.textContent = prefill?.sourceType ? `来源：${escapeHTML(sourceLabel(prefill))}` : "";
+  document.getElementById("editChecklistItemBtn").style.display = mode === "view" && canEditProject() ? "" : "none";
+  document.getElementById("saveChecklistItemBtn").style.display = mode === "view" ? "none" : "";
+  sourceHint.textContent =
+    prefill?.sourceType ? `来源：${escapeHTML(sourceLabel(prefill))}` :
+    item?.sourceType && item.sourceType !== "manual" ? `来源：${escapeHTML(sourceLabel(item))}` : "";
   renderChecklistFormOptions(payload.stageKey || stageKey, payload.ownerIds || []);
   form.elements.content.value = payload.content || "";
   form.elements.stageKey.value = payload.stageKey || stageKey;
@@ -1598,15 +1677,23 @@ async function openChecklistItemForm({ mode, itemId = "", stageKey = "ungrouped"
   form.elements.noteText.value = payload.noteText || "";
   updateChecklistSaveAvailability();
   form.querySelectorAll("input, select, textarea, button").forEach((control) => {
+    if (control.matches("[data-close-dialog]") || control.value === "cancel") {
+      control.disabled = false;
+      return;
+    }
+    if (control.id === "editChecklistItemBtn") {
+      control.disabled = mode !== "view" || !canEditProject();
+      return;
+    }
     if (control.id === "deleteChecklistItemBtn") {
       control.disabled = !canEditProject() || mode !== "edit";
       return;
     }
     if (control.id === "saveChecklistItemBtn") {
-      control.disabled = control.disabled || !canEditProject();
+      control.disabled = mode === "view" || control.disabled || !canEditProject();
       return;
     }
-    control.disabled = !canEditProject() && control.value !== "cancel";
+    control.disabled = mode === "view" || (!canEditProject() && control.value !== "cancel");
   });
   dialog.showModal();
 }
@@ -1853,6 +1940,44 @@ function moveSortItemToStage(itemId, stageKey) {
   renderChecklist();
 }
 
+function moveSortItemToPosition(itemId, targetStageKey, targetItemId = "", afterTarget = false) {
+  if (!checklistSortDraft) return;
+  const fromStage = checklistSortDraft.stages.find((entry) => entry.itemIds.includes(itemId));
+  const toStage = checklistSortDraft.stages.find((entry) => entry.stageKey === targetStageKey);
+  if (!fromStage || !toStage) return;
+  fromStage.itemIds = fromStage.itemIds.filter((id) => id !== itemId);
+  let insertIndex = toStage.itemIds.length;
+  if (targetItemId && targetItemId !== itemId) {
+    const targetIndex = toStage.itemIds.indexOf(targetItemId);
+    if (targetIndex >= 0) insertIndex = targetIndex + (afterTarget ? 1 : 0);
+  }
+  toStage.itemIds.splice(insertIndex, 0, itemId);
+  renderChecklist();
+}
+
+function cleanupChecklistSortDrag() {
+  document.querySelectorAll(".sortable-checklist-row.dragging").forEach((row) => row.classList.remove("dragging"));
+  document.body.classList.remove("is-sorting-drag");
+  checklistSortDragState = null;
+}
+
+function finishChecklistSortDrag(clientX, clientY) {
+  if (!checklistSortDragState) return;
+  const { itemId } = checklistSortDragState;
+  const target = document.elementFromPoint(clientX, clientY);
+  const targetRow = target?.closest?.("[data-sort-item]");
+  const targetBucket = target?.closest?.("[data-sort-stage-bucket]");
+  if (targetRow && targetRow.dataset.sortItem !== itemId) {
+    const rect = targetRow.getBoundingClientRect();
+    const afterTarget = clientY > rect.top + rect.height / 2;
+    const bucket = targetRow.closest("[data-sort-stage-bucket]");
+    moveSortItemToPosition(itemId, bucket.dataset.sortStageBucket, targetRow.dataset.sortItem, afterTarget);
+  } else if (targetBucket) {
+    moveSortItemToPosition(itemId, targetBucket.dataset.sortStageBucket);
+  }
+  cleanupChecklistSortDrag();
+}
+
 function saveChecklistSort() {
   if (!checklistSortDraft) return;
   const result = checklistCore.reorderExecutionItems(state, {
@@ -2031,9 +2156,21 @@ const decisionActions = {
 };
 
 const decisionInputMap = {
+  nodeId: "nodeId",
+  title: "title",
+  question: "question",
+  type: "type",
+  owner: "owner",
+  participants: "participants",
+  dueDate: "dueDate",
+  dueOffset: "dueOffset",
   status: "status",
   finalChoice: "finalChoice",
   conclusion: "conclusion",
+  gaps: "gaps",
+  options: "options",
+  criteria: "criteria",
+  linkedTaskIds: "linkedTaskIds",
 };
 
 function normalizeDecisionPatch(patch) {
@@ -2070,7 +2207,7 @@ function outputDecisionToNode(decisionId) {
   (decision.followUps || []).forEach(([title, owner, dueOffset]) => {
     const exists = state.tasks.some((task) => task.sourceDecisionId === decision.id && task.title === title);
     if (!exists) {
-      state.tasks.push({
+      const task = {
         id: uid("task"),
         nodeId: decision.nodeId,
         title,
@@ -2079,7 +2216,9 @@ function outputDecisionToNode(decisionId) {
         dueOffset,
         done: false,
         sourceDecisionId: decision.id,
-      });
+      };
+      state.tasks.push(task);
+      decision.linkedTaskIds = Array.from(new Set([...(decision.linkedTaskIds || []), task.id]));
     }
   });
 
@@ -2088,29 +2227,174 @@ function outputDecisionToNode(decisionId) {
   return decision;
 }
 
-function makeCustomDecision({ nodeId, title, type, owner, dueDate }) {
+function makeCustomDecision({
+  nodeId,
+  title,
+  question = "把候选方案、信息缺口和最终结论补齐后，再生成后续任务。",
+  type,
+  owner,
+  dueDate,
+  status = "信息收集中",
+  participants = "新人",
+  finalChoice = "",
+  conclusion = "",
+  gaps = ["需要补充候选方案信息"],
+  options = [],
+  criteria = [...DEFAULT_COMPARISON_CRITERIA],
+  linkedTaskIds = [],
+}) {
   return {
     id: uid("decision"),
     nodeId,
     title,
-    question: "把候选方案、信息缺口和最终结论补齐后，再输出到节点。",
+    question,
     type,
     owner,
-    participants: "新人",
+    participants,
     dueDate,
-    status: "信息收集中",
-    options: [
-      { name: "方案 A", notes: { 预算: "待补充", 体验: "待补充", 风险: "待补充" } },
-      { name: "方案 B", notes: { 预算: "待补充", 体验: "待补充", 风险: "待补充" } },
-      { name: "方案 C", notes: { 预算: "待补充", 体验: "待补充", 风险: "待补充" } },
-    ],
-    criteria: ["预算", "体验", "风险"],
-    gaps: ["需要补充候选方案信息"],
-    finalChoice: "",
-    conclusion: "",
+    status,
+    options: options.length
+      ? options
+      : [
+          { name: "方案 A", notes: { "预算/成本": "待补充", "体验/价值": "待补充", "风险/执行": "待补充" } },
+          { name: "方案 B", notes: { "预算/成本": "待补充", "体验/价值": "待补充", "风险/执行": "待补充" } },
+          { name: "方案 C", notes: { "预算/成本": "待补充", "体验/价值": "待补充", "风险/执行": "待补充" } },
+        ],
+    criteria,
+    gaps,
+    finalChoice,
+    conclusion,
+    linkedTaskIds,
     followUps: [["根据决策结论补充后续任务", owner, -30]],
     outputGenerated: false,
   };
+}
+
+function renderDecisionLinkedTaskOptions(decision, nodeId) {
+  const container = document.getElementById("decisionLinkedTaskCheckboxes");
+  const tasks = nodeTasks(nodeId);
+  const linkedTaskIds = new Set(decision?.linkedTaskIds || []);
+  container.innerHTML = tasks.length
+    ? tasks
+        .map((task) => `
+          <label>
+            <input type="checkbox" name="linkedTaskIds" value="${task.id}" ${linkedTaskIds.has(task.id) ? "checked" : ""} />
+            ${escapeHTML(task.title)}
+          </label>
+        `)
+        .join("")
+    : `<p class="subtle">这个节点暂无任务，先在节点里添加任务后再关联。</p>`;
+}
+
+function setDecisionDialogMode(mode) {
+  const form = document.getElementById("decisionDialogForm");
+  const isView = mode === "view";
+  decisionDialogState.mode = mode;
+  document.getElementById("decisionDialogTitle").textContent =
+    mode === "create" ? "新建决策" : isView ? "查看决策" : "编辑决策";
+  document.getElementById("deleteDecisionBtn").style.display = mode === "edit" ? "" : "none";
+  document.getElementById("editDecisionBtn").style.display = isView && decisionDialogState.decisionId ? "" : "none";
+  document.getElementById("saveDecisionBtn").style.display = isView ? "none" : "";
+  document.getElementById("saveDecisionBtn").disabled = isView;
+  form.querySelectorAll("input, textarea, select").forEach((control) => {
+    control.disabled = isView;
+  });
+}
+
+function openDecisionDialog({ mode = "create", decisionId = "", nodeId = selectedNodeId } = {}) {
+  const dialog = document.getElementById("decisionDialog");
+  const form = document.getElementById("decisionDialogForm");
+  const decision = decisionId ? state.decisions.find((item) => item.id === decisionId) : null;
+  const source = decision || makeCustomDecision({
+    nodeId,
+    title: "",
+    question: "",
+    type: "流程",
+    owner: "双方一起",
+    dueDate: isoDate(addDays(new Date(), 7)),
+    gaps: [],
+    options: [],
+    linkedTaskIds: [],
+  });
+  decisionDialogState = { mode, decisionId: decision?.id || "", dirty: false };
+  form.reset();
+  form.elements.decisionId.value = decision?.id || "";
+  form.elements.nodeId.innerHTML = enabledNodes()
+    .map((node) => `<option value="${node.id}" ${node.id === source.nodeId ? "selected" : ""}>${escapeHTML(node.name)}</option>`)
+    .join("");
+  form.elements.status.innerHTML = decisionStatusOptions(source.status || "信息收集中");
+  form.elements.owner.innerHTML = ownerNameOptions(source.owner || "双方一起");
+  form.elements.nodeId.value = source.nodeId || nodeId;
+  form.elements.title.value = source.title || "";
+  form.elements.question.value = source.question || "";
+  form.elements.type.value = source.type || "流程";
+  form.elements.status.value = source.status || "信息收集中";
+  form.elements.owner.value = source.owner || "双方一起";
+  form.elements.dueDate.value = decisionDueDateForForm(source);
+  form.elements.participants.value = source.participants || "";
+  form.elements.finalChoice.value = source.finalChoice || "";
+  form.elements.conclusion.value = source.conclusion || "";
+  form.elements.gapsText.value = (source.gaps || []).join("\n");
+  form.elements.comparisonText.value = serializeDecisionComparison(source);
+  renderDecisionLinkedTaskOptions(source, source.nodeId || nodeId);
+  setDecisionDialogMode(mode);
+  dialog.showModal();
+}
+
+function readDecisionDialogPayload() {
+  const form = document.getElementById("decisionDialogForm");
+  const comparison = parseDecisionComparison(form.elements.comparisonText.value);
+  return {
+    nodeId: form.elements.nodeId.value,
+    title: form.elements.title.value,
+    question: form.elements.question.value,
+    type: form.elements.type.value,
+    owner: form.elements.owner.value,
+    dueDate: form.elements.dueDate.value,
+    dueOffset: null,
+    status: form.elements.status.value,
+    participants: form.elements.participants.value,
+    finalChoice: form.elements.finalChoice.value,
+    conclusion: form.elements.conclusion.value,
+    gaps: form.elements.gapsText.value
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean),
+    options: comparison.options,
+    criteria: comparison.criteria,
+    linkedTaskIds: [...form.querySelectorAll("input[name='linkedTaskIds']:checked")].map((input) => input.value),
+  };
+}
+
+async function deleteDecisionFromDialog() {
+  if (!decisionDialogState?.decisionId) return;
+  const shouldDelete = await askConfirm({
+    title: "删除决策",
+    message: "删除后不会在 v1 提供撤销，确认删除这个决策 item？",
+    cancelText: "继续保留",
+    okText: "删除",
+  });
+  if (!shouldDelete) return;
+  decisionActions.remove(decisionDialogState.decisionId);
+  document.getElementById("decisionDialog").close();
+  decisionDialogState = null;
+  persistAndRender();
+  showToast("决策已删除");
+}
+
+function saveDecisionDialog() {
+  const payload = readDecisionDialogPayload();
+  if (decisionDialogState.mode === "create") {
+    decisionActions.create(payload);
+    showToast("已添加决策");
+  } else if (decisionDialogState.decisionId) {
+    decisionActions.update(decisionDialogState.decisionId, payload);
+    showToast("决策已保存");
+  }
+  document.getElementById("decisionDialog").close();
+  decisionDialogState = null;
+  selectedNodeId = payload.nodeId;
+  persistAndRender();
 }
 
 function handleDecisionInput(event) {
@@ -2131,16 +2415,26 @@ function handleDecisionChange(event) {
   persistAndRender();
 }
 
-function handleDecisionClick(event) {
+async function handleDecisionClick(event) {
   const actionButton = event.target.closest("[data-decision-action]");
   if (!actionButton) return;
   const action = actionButton.dataset.decisionAction;
+
+  if (action === "open-detail") {
+    openDecisionDialog({ mode: "view", decisionId: actionButton.dataset.decisionId });
+    return;
+  }
+
+  if (action === "edit-detail") {
+    openDecisionDialog({ mode: "edit", decisionId: actionButton.dataset.decisionId });
+    return;
+  }
 
   if (action === "output") {
     const decision = decisionActions.output(actionButton.dataset.decisionId);
     if (decision) {
       persistAndRender();
-      showToast("决策结果已输出到节点和执行包");
+      showToast("已生成后续任务，并加入执行包素材");
     }
     return;
   }
@@ -2156,13 +2450,21 @@ function handleDecisionClick(event) {
   }
 
   if (action === "open-checklist-item") {
-    openChecklistItemFromButton(actionButton.dataset.checklistItemId);
+    openChecklistItemFromButton(actionButton.dataset.checklistItemId, "view");
     return;
   }
 
   if (action === "delete") {
+    const shouldDelete = await askConfirm({
+      title: "删除决策",
+      message: "删除后不会在 v1 提供撤销，确认删除这个决策 item？",
+      cancelText: "继续保留",
+      okText: "删除",
+    });
+    if (!shouldDelete) return;
     decisionActions.remove(actionButton.dataset.decisionId);
     persistAndRender();
+    showToast("决策已删除");
   }
 }
 
@@ -2220,6 +2522,22 @@ document.querySelectorAll("[data-jump-view]").forEach((button) => {
   button.addEventListener("click", () => switchView(button.dataset.jumpView));
 });
 
+document.addEventListener("click", (event) => {
+  const closeButton = event.target.closest("[data-close-dialog]");
+  if (!closeButton) return;
+  const dialogId = closeButton.dataset.closeDialog;
+  if (dialogId === "checklistItemDialog") {
+    closeChecklistItemDialog(false);
+    return;
+  }
+  if (dialogId === "decisionDialog") {
+    document.getElementById("decisionDialog").close();
+    decisionDialogState = null;
+    return;
+  }
+  document.getElementById(dialogId)?.close();
+});
+
 document.getElementById("nodeMap").addEventListener("click", (event) => {
   const card = event.target.closest("[data-node-id]");
   if (!card) return;
@@ -2236,6 +2554,11 @@ document.getElementById("templateGrid").addEventListener("click", (event) => {
     selectedNodeId = enabledNodes()[0]?.id || "profile";
   }
   persistAndRender();
+});
+
+document.getElementById("openTemplateLibraryBtn").addEventListener("click", () => {
+  renderTemplateGrid();
+  document.getElementById("templateDialog").showModal();
 });
 
 document.getElementById("customNodeForm").addEventListener("submit", (event) => {
@@ -2317,7 +2640,7 @@ document.getElementById("nodeTaskList").addEventListener("change", (event) => {
   persistAndRender();
 });
 
-document.getElementById("nodeTaskList").addEventListener("click", (event) => {
+document.getElementById("nodeTaskList").addEventListener("click", async (event) => {
   const joinButton = event.target.closest("[data-join-task]");
   if (joinButton) {
     joinTaskToChecklist(joinButton.dataset.joinTask);
@@ -2330,36 +2653,54 @@ document.getElementById("nodeTaskList").addEventListener("click", (event) => {
   }
   const button = event.target.closest("[data-delete-task]");
   if (!button) return;
+  const task = state.tasks.find((item) => item.id === button.dataset.deleteTask);
+  const shouldDelete = await askConfirm({
+    title: "删除任务",
+    message: `确认删除“${task?.title || "这个任务"}”？`,
+    cancelText: "继续保留",
+    okText: "删除",
+  });
+  if (!shouldDelete) return;
   state.tasks = state.tasks.filter((task) => task.id !== button.dataset.deleteTask);
+  state.decisions.forEach((decision) => {
+    decision.linkedTaskIds = (decision.linkedTaskIds || []).filter((taskId) => taskId !== button.dataset.deleteTask);
+  });
   persistAndRender();
+  showToast("任务已删除");
 });
 
 document.getElementById("quickDecisionBtn").addEventListener("click", () => {
-  activeDecisionNodeId = selectedNodeId;
-  const form = document.getElementById("decisionDialogForm");
-  form.reset();
-  form.elements.owner.innerHTML = ownerNameOptions("双方一起");
-  form.elements.dueDate.value = isoDate(addDays(new Date(), 7));
-  document.getElementById("decisionDialog").showModal();
+  openDecisionDialog({ mode: "create", nodeId: selectedNodeId });
 });
 
-document.getElementById("decisionDialogForm").addEventListener("submit", (event) => {
+document.getElementById("newDecisionFromCenterBtn").addEventListener("click", () => {
+  openDecisionDialog({ mode: "create", nodeId: selectedNodeId });
+});
+
+document.getElementById("decisionDialogNodeSelect").addEventListener("change", (event) => {
+  const decision = decisionDialogState?.decisionId
+    ? state.decisions.find((item) => item.id === decisionDialogState.decisionId)
+    : { linkedTaskIds: [] };
+  renderDecisionLinkedTaskOptions(decision, event.target.value);
+});
+
+document.getElementById("decisionDialogForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (event.submitter?.value === "cancel") {
+  const value = event.submitter?.value;
+  if (value === "cancel") {
     document.getElementById("decisionDialog").close();
+    decisionDialogState = null;
     return;
   }
-  const data = new FormData(event.currentTarget);
-  decisionActions.create({
-    nodeId: activeDecisionNodeId,
-    title: data.get("title"),
-    type: data.get("type"),
-    owner: data.get("owner"),
-    dueDate: data.get("dueDate"),
-  });
-  document.getElementById("decisionDialog").close();
-  persistAndRender();
-  showToast("已在当前节点添加决策");
+  if (value === "edit") {
+    setDecisionDialogMode("edit");
+    return;
+  }
+  if (value === "delete") {
+    await deleteDecisionFromDialog();
+    return;
+  }
+  saveDecisionDialog();
 });
 
 document.getElementById("nodeDecisionList").addEventListener("input", handleDecisionInput);
@@ -2374,22 +2715,6 @@ document.getElementById("decisionFilter").addEventListener("click", (event) => {
     item.classList.toggle("active", item === button);
   });
   renderDecisionBoard();
-});
-
-document.getElementById("decisionForm").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const data = new FormData(event.currentTarget);
-  decisionActions.create({
-    nodeId: data.get("nodeId"),
-    title: data.get("title"),
-    type: "自定义",
-    owner: data.get("owner"),
-    dueDate: isoDate(addDays(new Date(), 7)),
-  });
-  event.currentTarget.reset();
-  document.getElementById("decisionNodeSelect").value = selectedNodeId;
-  event.currentTarget.elements.owner.innerHTML = ownerNameOptions("双方一起");
-  persistAndRender();
 });
 
 document.getElementById("decisionBoard").addEventListener("input", handleDecisionInput);
@@ -2429,6 +2754,11 @@ document.getElementById("checklistOwnerFilter").addEventListener("change", (even
   renderChecklist();
 });
 
+document.getElementById("checklistStageFilter").addEventListener("change", (event) => {
+  checklistStageFilter = event.target.value;
+  renderChecklist();
+});
+
 document.getElementById("checklistSortActions").addEventListener("click", (event) => {
   if (event.target.closest("#cancelChecklistSortBtn")) {
     checklistSortDraft = null;
@@ -2452,7 +2782,7 @@ document.getElementById("checklistContent").addEventListener("click", (event) =>
   }
   const editButton = event.target.closest("[data-edit-checklist-item]");
   if (editButton) {
-    openChecklistItemForm({ mode: "edit", itemId: editButton.dataset.editChecklistItem });
+    openChecklistItemForm({ mode: canEditProject() ? "edit" : "view", itemId: editButton.dataset.editChecklistItem });
     return;
   }
   const toggleButton = event.target.closest("[data-toggle-checklist-status]");
@@ -2489,12 +2819,59 @@ document.getElementById("checklistContent").addEventListener("change", (event) =
   moveSortItemToStage(stageSelect.dataset.sortStage, stageSelect.value);
 });
 
+document.getElementById("checklistContent").addEventListener("pointerdown", (event) => {
+  const handle = event.target.closest("[data-sort-handle]");
+  if (!handle || !checklistSortDraft) return;
+  event.preventDefault();
+  const row = handle.closest("[data-sort-item]");
+  checklistSortDragState = {
+    itemId: handle.dataset.sortDrag,
+    pointerId: event.pointerId,
+  };
+  row?.classList.add("dragging");
+  document.body.classList.add("is-sorting-drag");
+  handle.setPointerCapture?.(event.pointerId);
+});
+
+document.addEventListener("pointerup", (event) => {
+  if (!checklistSortDragState) return;
+  finishChecklistSortDrag(event.clientX, event.clientY);
+});
+
+document.addEventListener("pointercancel", cleanupChecklistSortDrag);
+
+document.getElementById("checklistContent").addEventListener("dragstart", (event) => {
+  const row = event.target.closest("[data-sort-item]");
+  if (!row || !checklistSortDraft) return;
+  checklistSortDragState = { itemId: row.dataset.sortItem };
+  event.dataTransfer?.setData("text/plain", row.dataset.sortItem);
+  row.classList.add("dragging");
+});
+
+document.getElementById("checklistContent").addEventListener("dragover", (event) => {
+  if (!checklistSortDragState) return;
+  event.preventDefault();
+});
+
+document.getElementById("checklistContent").addEventListener("drop", (event) => {
+  if (!checklistSortDragState) return;
+  event.preventDefault();
+  finishChecklistSortDrag(event.clientX, event.clientY);
+});
+
 document.getElementById("checklistItemForm").addEventListener("input", scheduleChecklistDraftSave);
 document.getElementById("checklistItemForm").addEventListener("change", scheduleChecklistDraftSave);
 
 document.getElementById("checklistItemForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const value = event.submitter?.value;
+  if (value === "edit") {
+    const itemId = checklistFormState?.itemId;
+    document.getElementById("checklistItemDialog").close();
+    checklistFormState = null;
+    if (itemId) openChecklistItemForm({ mode: "edit", itemId });
+    return;
+  }
   if (value === "cancel") {
     await closeChecklistItemDialog(false);
     return;
@@ -2577,6 +2954,7 @@ document.getElementById("resetBtn").addEventListener("click", () => {
   decisionFilter = "all";
   checklistStatusFilter = "all";
   checklistOwnerFilter = "all";
+  checklistStageFilter = "all";
   checklistStatusSavingItemId = "";
   checklistSortDraft = null;
   checklistFormState = null;

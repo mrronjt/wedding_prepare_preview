@@ -107,28 +107,9 @@
             <section class="map-board">
               <div class="section-heading">
                 <span>备婚地图</span>
-                <button class="text-button" data-jump-view="decisions" type="button">查看所有决策</button>
+                <button class="text-button" id="openTemplateLibraryBtn" type="button">节点模板库</button>
               </div>
               <div class="wedding-map" id="nodeMap"></div>
-            </section>
-
-            <section class="template-section">
-              <div class="section-heading">
-                <span>节点模板库</span>
-                <span class="subtle">草坪仪式 · 室内晚宴/自助餐 · 别墅 After Party</span>
-              </div>
-              <div class="template-grid" id="templateGrid"></div>
-              <form class="inline-form custom-node-form" id="customNodeForm">
-                <input name="name" placeholder="新增自定义节点，例如：宠物出场" autocomplete="off" required />
-                <select name="type" aria-label="节点类型">
-                  <option>自定义</option>
-                  <option>商家</option>
-                  <option>流程</option>
-                  <option>家庭</option>
-                  <option>物料</option>
-                </select>
-                <button type="submit">添加节点</button>
-              </form>
             </section>
           </section>
 
@@ -159,8 +140,8 @@
               </section>
               <section class="panel-block">
                 <div class="section-heading">
-                  <span>输出到执行包</span>
-                  <span class="subtle">自动汇总</span>
+                  <span>执行包素材</span>
+                  <span class="subtle">自动汇总到执行包</span>
                 </div>
                 <div class="output-list" id="nodeOutputList"></div>
               </section>
@@ -176,24 +157,19 @@
 
           <section class="view-panel" id="decisionsView">
             <div class="toolbar">
-              <div class="segmented" id="decisionFilter">
-                <button class="active" data-filter="all" type="button">全部</button>
-                <button data-filter="open" type="button">推进中</button>
-                <button data-filter="blocked" type="button">待拍板</button>
-                <button data-filter="done" type="button">已输出</button>
+              <div>
+                <p class="panel-kicker">跨节点总览</p>
+                <h2>决策汇总</h2>
               </div>
-              <form class="inline-form decision-form" id="decisionForm">
-                <select name="nodeId" aria-label="所属节点" id="decisionNodeSelect"></select>
-                <input name="title" placeholder="新增决策 item" autocomplete="off" required />
-                <select name="owner" aria-label="负责人">
-                  <option>新娘</option>
-                  <option>新郎</option>
-                  <option>双方一起</option>
-                  <option>当天负责人</option>
-                  <option>朋友协助</option>
-                </select>
-                <button type="submit">添加</button>
-              </form>
+              <div class="topbar-actions">
+                <div class="segmented" id="decisionFilter">
+                  <button class="active" data-filter="all" type="button">全部</button>
+                  <button data-filter="open" type="button">推进中</button>
+                  <button data-filter="blocked" type="button">待拍板</button>
+                  <button data-filter="done" type="button">已生成</button>
+                </div>
+                <button class="primary-button" id="newDecisionFromCenterBtn" type="button">新建决策</button>
+              </div>
             </div>
             <div class="decision-board" id="decisionBoard"></div>
           </section>
@@ -225,6 +201,7 @@
                 <button data-checklist-status-filter="confirmed" type="button">已确认</button>
               </div>
               <select id="checklistOwnerFilter" aria-label="负责人筛选"></select>
+              <select id="checklistStageFilter" aria-label="执行阶段筛选"></select>
             </div>
             <div class="checklist-sort-actions" id="checklistSortActions"></div>
             <div class="checklist-content" id="checklistContent"></div>
@@ -277,7 +254,7 @@
       <form method="dialog" class="dialog-card" id="taskDialogForm">
         <div class="section-heading">
           <span>添加任务</span>
-          <button class="icon-button" value="cancel" type="submit" aria-label="关闭">×</button>
+          <button class="icon-button" value="cancel" type="button" data-close-dialog="taskDialog" aria-label="关闭">×</button>
         </div>
         <input name="title" placeholder="任务名称" autocomplete="off" required />
         <select name="owner" aria-label="负责人">
@@ -295,28 +272,82 @@
     <dialog id="decisionDialog">
       <form method="dialog" class="dialog-card" id="decisionDialogForm">
         <div class="section-heading">
-          <span>新建决策</span>
-          <button class="icon-button" value="cancel" type="submit" aria-label="关闭">×</button>
+          <span id="decisionDialogTitle">新建决策</span>
+          <button class="icon-button" value="cancel" type="button" data-close-dialog="decisionDialog" aria-label="关闭">×</button>
         </div>
-        <input name="title" placeholder="决策标题，例如：雨备方案怎么定" autocomplete="off" required />
-        <select name="type" aria-label="决策类型">
-          <option>流程</option>
-          <option>预算</option>
-          <option>商家</option>
-          <option>宾客</option>
-          <option>风险</option>
-          <option>交接</option>
-          <option>自定义</option>
-        </select>
-        <select name="owner" aria-label="负责人">
-          <option>新娘</option>
-          <option>新郎</option>
-          <option>双方一起</option>
-          <option>当天负责人</option>
-          <option>朋友协助</option>
-        </select>
-        <input name="dueDate" type="date" aria-label="截止日期" required />
-        <button class="primary-button" value="default" type="submit">保存决策</button>
+        <input name="decisionId" type="hidden" />
+        <label>
+          所属节点
+          <select name="nodeId" id="decisionDialogNodeSelect" aria-label="所属节点"></select>
+        </label>
+        <label>
+          决策标题
+          <input name="title" placeholder="例如：雨备方案怎么定" autocomplete="off" required />
+        </label>
+        <label>
+          需要回答的问题
+          <textarea name="question" rows="3" placeholder="把需要拍板的问题写清楚" required></textarea>
+        </label>
+        <div class="field-row">
+          <label>
+            决策类型
+            <select name="type" aria-label="决策类型">
+              <option>流程</option>
+              <option>预算</option>
+              <option>商家</option>
+              <option>宾客</option>
+              <option>风险</option>
+              <option>交接</option>
+              <option>自定义</option>
+            </select>
+          </label>
+          <label>
+            状态
+            <select name="status" aria-label="决策状态"></select>
+          </label>
+        </div>
+        <div class="field-row">
+          <label>
+            负责人
+            <select name="owner" aria-label="负责人"></select>
+          </label>
+          <label>
+            截止日期
+            <input name="dueDate" type="date" aria-label="截止日期" required />
+          </label>
+        </div>
+        <label>
+          参与人
+          <input name="participants" autocomplete="off" placeholder="例如：新人、双方父母、场地方" />
+        </label>
+        <label>
+          最终选择
+          <input name="finalChoice" autocomplete="off" placeholder="例如：草坪仪式 + 室内晚宴" />
+        </label>
+        <label>
+          决策理由 / 交接备注
+          <textarea name="conclusion" rows="3" placeholder="写清楚为什么这样选"></textarea>
+        </label>
+        <label>
+          信息缺口
+          <textarea name="gapsText" rows="3" placeholder="每行一个信息缺口"></textarea>
+        </label>
+        <label>
+          方案对比
+          <textarea name="comparisonText" rows="5" placeholder="每行一个方案：方案名 | 预算/成本 | 体验/价值 | 风险/执行"></textarea>
+        </label>
+        <fieldset class="owner-checkboxes">
+          <legend>关联任务</legend>
+          <p class="subtle">同一个任务可以关联到多个决策 item。</p>
+          <div id="decisionLinkedTaskCheckboxes"></div>
+        </fieldset>
+        <div class="dialog-actions">
+          <button class="ghost-button danger" id="deleteDecisionBtn" value="delete" type="submit" formnovalidate>删除</button>
+          <span></span>
+          <button class="ghost-button" id="editDecisionBtn" value="edit" type="submit" formnovalidate>编辑</button>
+          <button class="ghost-button" value="cancel" type="button" data-close-dialog="decisionDialog">关闭</button>
+          <button class="primary-button" id="saveDecisionBtn" value="save" type="submit">保存决策</button>
+        </div>
       </form>
     </dialog>
 
@@ -324,7 +355,7 @@
       <form method="dialog" class="dialog-card checklist-dialog" id="checklistItemForm">
         <div class="section-heading">
           <span id="checklistDialogTitle">新增执行项</span>
-          <button class="icon-button" value="cancel" type="submit" aria-label="关闭">×</button>
+          <button class="icon-button" value="cancel" type="button" data-close-dialog="checklistItemDialog" aria-label="关闭">×</button>
         </div>
         <p class="subtle" id="checklistSourceHint"></p>
         <label>
@@ -365,6 +396,7 @@
         <div class="dialog-actions">
           <button class="ghost-button danger" id="deleteChecklistItemBtn" value="delete" type="submit">删除</button>
           <span></span>
+          <button class="ghost-button" id="editChecklistItemBtn" value="edit" type="submit" formnovalidate>编辑</button>
           <button class="ghost-button" value="cancel" type="submit">取消</button>
           <button class="primary-button" id="saveChecklistItemBtn" value="save" type="submit">保存执行项</button>
         </div>
@@ -375,7 +407,7 @@
       <form method="dialog" class="dialog-card" id="ownerDialogForm">
         <div class="section-heading">
           <span>管理负责人</span>
-          <button class="icon-button" value="cancel" type="submit" aria-label="关闭">×</button>
+          <button class="icon-button" value="cancel" type="button" data-close-dialog="ownerDialog" aria-label="关闭">×</button>
         </div>
         <div class="owner-list" id="ownerList"></div>
         <label>
@@ -385,6 +417,28 @@
         </label>
         <button class="primary-button" value="add" type="submit">添加负责人</button>
       </form>
+    </dialog>
+
+    <dialog id="templateDialog">
+      <section class="dialog-card template-dialog">
+        <div class="section-heading">
+          <span>节点模板库</span>
+          <button class="icon-button" type="button" data-close-dialog="templateDialog" aria-label="关闭">×</button>
+        </div>
+        <p class="subtle">按需要启用场景节点；自定义节点适合补充家庭习俗、特殊流程或个性化环节。</p>
+        <div class="template-grid" id="templateGrid"></div>
+        <form class="inline-form custom-node-form" id="customNodeForm">
+          <input name="name" placeholder="新增自定义节点，例如：宠物出场" autocomplete="off" required />
+          <select name="type" aria-label="节点类型">
+            <option>自定义</option>
+            <option>商家</option>
+            <option>流程</option>
+            <option>家庭</option>
+            <option>物料</option>
+          </select>
+          <button type="submit">添加节点</button>
+        </form>
+      </section>
     </dialog>
 
     <dialog id="confirmDialog">
