@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>喜事计划舱</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">备婚项目地图</p>
+          <h1>喜事计划舱</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="ghost-button" id="exportPackageBtn" type="button">导出执行包</button>
+          <button class="ghost-button danger" id="resetBtn" type="button">重置原型</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <aside class="profile-panel">
+          <form id="profileForm" class="profile-form">
+            <div class="section-heading">
+              <span>婚礼档案</span>
+              <strong id="daysLeft">-- 天</strong>
+            </div>
+
+            <div class="field-row">
+              <label>
+                新郎
+                <input name="groom" autocomplete="off" />
+              </label>
+              <label>
+                新娘
+                <input name="bride" autocomplete="off" />
+              </label>
+            </div>
+            <label>
+              婚期
+              <input name="date" type="date" />
+            </label>
+            <label>
+              城市
+              <input name="city" autocomplete="off" />
+            </label>
+            <label>
+              主场地
+              <input name="venue" autocomplete="off" />
+            </label>
+            <div class="field-row">
+              <label>
+                总预算
+                <input name="budget" type="number" min="0" step="1000" />
+              </label>
+              <label>
+                宾客
+                <input name="guestCount" type="number" min="0" step="1" />
+              </label>
+            </div>
+
+            <section class="readiness-card">
+              <div class="section-heading">
+                <span>婚礼就绪度</span>
+                <strong id="readinessText">0%</strong>
+              </div>
+              <div class="meter"><span id="readinessMeter"></span></div>
+              <p id="readinessHint">先完成关键节点和待拍板决策。</p>
+            </section>
+          </form>
+        </aside>
+
+        <section class="workspace">
+          <nav class="tabs" aria-label="备婚模块">
+            <button class="tab active" data-view="map" type="button">地图</button>
+            <button class="tab" data-view="node" type="button">节点</button>
+            <button class="tab" data-view="decisions" type="button">决策中心</button>
+            <button class="tab" data-view="checklist" type="button">执行清单</button>
+            <button class="tab" data-view="package" type="button">执行包</button>
+          </nav>
+
+          <section class="view-panel active" id="mapView">
+            <div class="stats-grid">
+              <article class="stat-card">
+                <span>已启用节点</span>
+                <strong id="enabledNodeStat">0</strong>
+                <p>核心节点 + 场景推荐</p>
+              </article>
+              <article class="stat-card">
+                <span>待拍板决策</span>
+                <strong id="decisionStat">0</strong>
+                <p>需要继续收集或拍板</p>
+              </article>
+              <article class="stat-card">
+                <span>待执行事项</span>
+                <strong id="taskStat">0</strong>
+                <p>含决策输出后的任务</p>
+              </article>
+              <article class="stat-card">
+                <span>风险提醒</span>
+                <strong id="riskStat">0</strong>
+                <p>逾期或缺口未补齐</p>
+              </article>
+            </div>
+
+            <section class="map-board">
+              <div class="section-heading">
+                <span>备婚地图</span>
+                <button class="text-button" data-jump-view="decisions" type="button">查看所有决策</button>
+              </div>
+              <div class="wedding-map" id="nodeMap"></div>
+            </section>
+
+            <section class="template-section">
+              <div class="section-heading">
+                <span>节点模板库</span>
+                <span class="subtle">草坪仪式 · 室内晚宴/自助餐 · 别墅 After Party</span>
+              </div>
+              <div class="template-grid" id="templateGrid"></div>
+              <form class="inline-form custom-node-form" id="customNodeForm">
+                <input name="name" placeholder="新增自定义节点，例如：宠物出场" autocomplete="off" required />
+                <select name="type" aria-label="节点类型">
+                  <option>自定义</option>
+                  <option>商家</option>
+                  <option>流程</option>
+                  <option>家庭</option>
+                  <option>物料</option>
+                </select>
+                <button type="submit">添加节点</button>
+              </form>
+            </section>
+          </section>
+
+          <section class="view-panel" id="nodeView">
+            <div class="node-toolbar">
+              <div>
+                <p class="panel-kicker">当前节点</p>
+                <h2 id="nodeTitle">节点详情</h2>
+              </div>
+              <select id="nodeSelect" aria-label="切换节点"></select>
+            </div>
+
+            <div class="node-detail-grid">
+              <section class="panel-block node-summary" id="nodeSummary"></section>
+              <section class="panel-block">
+                <div class="section-heading">
+                  <span>任务</span>
+                  <button class="text-button" id="quickTaskBtn" type="button">添加任务</button>
+                </div>
+                <div class="task-list" id="nodeTaskList"></div>
+              </section>
+              <section class="panel-block">
+                <div class="section-heading">
+                  <span>决策 item</span>
+                  <button class="text-button" id="quickDecisionBtn" type="button">新建决策</button>
+                </div>
+                <div class="decision-mini-list" id="nodeDecisionList"></div>
+              </section>
+              <section class="panel-block">
+                <div class="section-heading">
+                  <span>输出到执行包</span>
+                  <span class="subtle">自动汇总</span>
+                </div>
+                <div class="output-list" id="nodeOutputList"></div>
+              </section>
+              <section class="panel-block">
+                <div class="section-heading">
+                  <span>推荐加入执行清单</span>
+                  <button class="text-button" id="joinNodeCandidatesBtn" type="button">批量加入</button>
+                </div>
+                <div class="candidate-list" id="nodeCandidateList"></div>
+              </section>
+            </div>
+          </section>
+
+          <section class="view-panel" id="decisionsView">
+            <div class="toolbar">
+              <div class="segmented" id="decisionFilter">
+                <button class="active" data-filter="all" type="button">全部</button>
+                <button data-filter="open" type="button">推进中</button>
+                <button data-filter="blocked" type="button">待拍板</button>
+                <button data-filter="done" type="button">已输出</button>
+              </div>
+              <form class="inline-form decision-form" id="decisionForm">
+                <select name="nodeId" aria-label="所属节点" id="decisionNodeSelect"></select>
+                <input name="title" placeholder="新增决策 item" autocomplete="off" required />
+                <select name="owner" aria-label="负责人">
+                  <option>新娘</option>
+                  <option>新郎</option>
+                  <option>双方一起</option>
+                  <option>当天负责人</option>
+                  <option>朋友协助</option>
+                </select>
+                <button type="submit">添加</button>
+              </form>
+            </div>
+            <div class="decision-board" id="decisionBoard"></div>
+          </section>
+
+          <section class="view-panel" id="checklistView">
+            <div class="checklist-hero">
+              <div>
+                <p class="panel-kicker">最终交接清单</p>
+                <h2>婚礼执行清单</h2>
+              </div>
+              <div class="topbar-actions">
+                <label class="compact-control">
+                  权限
+                  <select id="projectRoleSelect" aria-label="当前权限">
+                    <option value="editor">编辑者</option>
+                    <option value="viewer">只读</option>
+                  </select>
+                </label>
+                <button class="ghost-button" id="manageOwnersBtn" type="button">管理负责人</button>
+                <button class="ghost-button" id="sortChecklistBtn" type="button">调整顺序</button>
+                <button class="primary-button" id="addChecklistItemBtn" type="button">新增执行项</button>
+              </div>
+            </div>
+            <div class="checklist-stats" id="checklistStats"></div>
+            <div class="toolbar checklist-toolbar">
+              <div class="segmented" id="checklistStatusFilter" aria-label="执行状态筛选">
+                <button class="active" data-checklist-status-filter="all" type="button">全部</button>
+                <button data-checklist-status-filter="pending" type="button">待确认</button>
+                <button data-checklist-status-filter="confirmed" type="button">已确认</button>
+              </div>
+              <select id="checklistOwnerFilter" aria-label="负责人筛选"></select>
+            </div>
+            <div class="checklist-sort-actions" id="checklistSortActions"></div>
+            <div class="checklist-content" id="checklistContent"></div>
+          </section>
+
+          <section class="view-panel" id="packageView">
+            <div class="package-hero">
+              <div>
+                <p class="panel-kicker">由地图节点自动汇总</p>
+                <h2>婚礼执行包</h2>
+              </div>
+              <button class="primary-button" id="copyPackageBtn" type="button">复制执行包文本</button>
+            </div>
+            <div class="package-grid">
+              <section class="panel-block">
+                <div class="section-heading">
+                  <span>当天关键流程</span>
+                  <span class="subtle">草坪 → 晚宴 → After Party</span>
+                </div>
+                <div class="package-list" id="timelinePackage"></div>
+              </section>
+              <section class="panel-block">
+                <div class="section-heading">
+                  <span>负责人交接</span>
+                  <span class="subtle">新人自用版</span>
+                </div>
+                <div class="package-list" id="ownerPackage"></div>
+              </section>
+              <section class="panel-block">
+                <div class="section-heading">
+                  <span>风险与信息缺口</span>
+                  <span class="subtle">优先处理</span>
+                </div>
+                <div class="package-list" id="riskPackage"></div>
+              </section>
+              <section class="panel-block">
+                <div class="section-heading">
+                  <span>决策结果</span>
+                  <span class="subtle">已回写节点</span>
+                </div>
+                <div class="package-list" id="decisionPackage"></div>
+              </section>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="taskDialog">
+      <form method="dialog" class="dialog-card" id="taskDialogForm">
+        <div class="section-heading">
+          <span>添加任务</span>
+          <button class="icon-button" value="cancel" type="submit" aria-label="关闭">×</button>
+        </div>
+        <input name="title" placeholder="任务名称" autocomplete="off" required />
+        <select name="owner" aria-label="负责人">
+          <option>新娘</option>
+          <option>新郎</option>
+          <option>双方一起</option>
+          <option>当天负责人</option>
+          <option>朋友协助</option>
+        </select>
+        <input name="dueDate" type="date" aria-label="截止日期" required />
+        <button class="primary-button" value="default" type="submit">保存任务</button>
+      </form>
+    </dialog>
+
+    <dialog id="decisionDialog">
+      <form method="dialog" class="dialog-card" id="decisionDialogForm">
+        <div class="section-heading">
+          <span>新建决策</span>
+          <button class="icon-button" value="cancel" type="submit" aria-label="关闭">×</button>
+        </div>
+        <input name="title" placeholder="决策标题，例如：雨备方案怎么定" autocomplete="off" required />
+        <select name="type" aria-label="决策类型">
+          <option>流程</option>
+          <option>预算</option>
+          <option>商家</option>
+          <option>宾客</option>
+          <option>风险</option>
+          <option>交接</option>
+          <option>自定义</option>
+        </select>
+        <select name="owner" aria-label="负责人">
+          <option>新娘</option>
+          <option>新郎</option>
+          <option>双方一起</option>
+          <option>当天负责人</option>
+          <option>朋友协助</option>
+        </select>
+        <input name="dueDate" type="date" aria-label="截止日期" required />
+        <button class="primary-button" value="default" type="submit">保存决策</button>
+      </form>
+    </dialog>
+
+    <dialog id="checklistItemDialog">
+      <form method="dialog" class="dialog-card checklist-dialog" id="checklistItemForm">
+        <div class="section-heading">
+          <span id="checklistDialogTitle">新增执行项</span>
+          <button class="icon-button" value="cancel" type="submit" aria-label="关闭">×</button>
+        </div>
+        <p class="subtle" id="checklistSourceHint"></p>
+        <label>
+          执行内容
+          <textarea name="content" rows="3" placeholder="例如：仪式前检查音响和麦克风"></textarea>
+          <span class="field-error" data-error-for="content"></span>
+        </label>
+        <div class="field-row">
+          <label>
+            执行阶段
+            <select name="stageKey" id="checklistStageSelect"></select>
+            <span class="field-error" data-error-for="stageKey"></span>
+          </label>
+          <label>
+            状态
+            <select name="status">
+              <option>待确认</option>
+              <option>已确认</option>
+            </select>
+            <span class="field-error" data-error-for="status"></span>
+          </label>
+        </div>
+        <label>
+          执行时间
+          <input name="timeText" autocomplete="off" placeholder="如：仪式前 30 分钟" />
+          <span class="field-error" data-error-for="timeText"></span>
+        </label>
+        <fieldset class="owner-checkboxes">
+          <legend>负责人</legend>
+          <div id="checklistOwnerCheckboxes"></div>
+          <span class="field-error" data-error-for="ownerIds"></span>
+        </fieldset>
+        <label>
+          备注
+          <textarea name="noteText" rows="5" placeholder="补充交接细节，支持换行"></textarea>
+          <span class="field-error" data-error-for="noteText"></span>
+        </label>
+        <div class="dialog-actions">
+          <button class="ghost-button danger" id="deleteChecklistItemBtn" value="delete" type="submit">删除</button>
+          <span></span>
+          <button class="ghost-button" value="cancel" type="submit">取消</button>
+          <button class="primary-button" id="saveChecklistItemBtn" value="save" type="submit">保存执行项</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="ownerDialog">
+      <form method="dialog" class="dialog-card" id="ownerDialogForm">
+        <div class="section-heading">
+          <span>管理负责人</span>
+          <button class="icon-button" value="cancel" type="submit" aria-label="关闭">×</button>
+        </div>
+        <div class="owner-list" id="ownerList"></div>
+        <label>
+          新负责人
+          <input name="name" autocomplete="off" placeholder="例如：伴郎小周" />
+          <span class="field-error" data-error-for="ownerName"></span>
+        </label>
+        <button class="primary-button" value="add" type="submit">添加负责人</button>
+      </form>
+    </dialog>
+
+    <dialog id="confirmDialog">
+      <form method="dialog" class="dialog-card confirm-card" id="confirmDialogForm">
+        <div class="section-heading">
+          <span id="confirmDialogTitle">确认</span>
+        </div>
+        <p id="confirmDialogMessage"></p>
+        <div class="dialog-actions">
+          <span></span>
+          <button class="ghost-button" id="confirmCancelBtn" value="cancel" type="submit">取消</button>
+          <button class="primary-button" id="confirmOkBtn" value="ok" type="submit">确认</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="executionChecklistCore.js"></script>
+    <script src="config/execution-checklist-recommendations.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
