@@ -598,6 +598,10 @@ textarea {
   text-decoration: line-through;
 }
 
+.task-row-body {
+  min-width: 0;
+}
+
 .task-check {
   width: 22px;
   height: 22px;
@@ -607,11 +611,13 @@ textarea {
 .row-title {
   margin: 0 0 4px;
   font-weight: 850;
+  overflow-wrap: anywhere;
 }
 
 .row-meta {
   color: var(--muted);
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .decision-mini {
@@ -733,6 +739,36 @@ textarea {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
+}
+
+.decision-output-dialog {
+  width: min(94vw, 720px);
+}
+
+.decision-output-task-list {
+  display: grid;
+  gap: 10px;
+}
+
+.decision-output-task-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+  padding: 12px;
+}
+
+.decision-output-task-row .field-row {
+  grid-column: 1;
+}
+
+.decision-output-task-row .delete-button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
 }
 
 .decision-result {
@@ -1178,6 +1214,37 @@ dialog::backdrop {
   .candidate-row,
   .owner-row {
     grid-template-columns: 1fr;
+  }
+
+  .task-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .task-row .checklist-row-actions {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(48px, 72px);
+    justify-content: stretch;
+  }
+
+  .task-row .checklist-row-actions .delete-button {
+    justify-self: stretch;
+  }
+
+  .decision-output-task-row {
+    grid-template-columns: 1fr;
+  }
+
+  .decision-output-task-row .field-row,
+  .decision-output-task-row .delete-button {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .decision-output-task-row .delete-button {
+    justify-self: end;
+    min-width: 52px;
   }
 
   .checklist-row-actions,

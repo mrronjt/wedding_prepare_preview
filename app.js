@@ -618,6 +618,7 @@ let checklistFormState = null;
 let checklistSortDraft = null;
 let checklistSortDragState = null;
 let decisionDialogState = null;
+let decisionOutputDialogState = null;
 let pendingConfirmResolver = null;
 const checklistDrafts = new Map();
 let checklistDraftTimer = null;
@@ -1211,7 +1212,7 @@ function renderNodeTasks(nodeId) {
           return `
             <article class="task-row ${task.done ? "done" : ""}">
               <input class="task-check" type="checkbox" data-task-id="${task.id}" ${task.done ? "checked" : ""} aria-label="切换任务状态" />
-              <div>
+              <div class="task-row-body">
                 <p class="row-title">${escapeHTML(task.title)}</p>
                 <p class="row-meta">${formatDate(due)} · ${escapeHTML(taskOwnerText(task))} · ${dueLabel}</p>
               </div>
@@ -1294,7 +1295,9 @@ function renderDecisionSummaryCard(decision, context = "center") {
   const linkedTaskText = view.linkedTaskCount ? `${view.linkedTaskCount} 个关联任务` : "未关联任务";
   const outputButton = view.outputGenerated
     ? `<button class="ghost-button" type="button" disabled>已生成后续任务</button>`
-    : `<button class="primary-button" data-decision-action="output" data-decision-id="${view.id}" type="button">生成后续任务</button>`;
+    : view.status === "已决定"
+      ? `<button class="primary-button" data-decision-action="output" data-decision-id="${view.id}" type="button">生成后续任务</button>`
+      : "";
 
   return `
     <article class="decision-card ${context === "node" ? "node-decision-card" : ""}" data-decision-id="${view.id}">
@@ -2266,8 +2269,8 @@ const decisionActions = {
     Object.assign(decision, normalizeDecisionPatch(patch));
     return decision;
   },
-  output(decisionId) {
-    return outputDecisionToNode(decisionId);
+  output(decisionId, payload) {
+    return outputDecisionToNode(decisionId, payload);
   },
   remove(decisionId) {
     const before = state.decisions.length;
@@ -2302,20 +2305,91 @@ function normalizeDecisionPatch(patch) {
   }, {});
 }
 
-function outputDecisionToNode(decisionId) {
+function decisionDefaultFinalChoice(decision) {
+  return decision.finalChoice || decision.options?.[0]?.name || "已决定方案";
+}
+
+function decisionDefaultConclusion(decision) {
+  return decision.conclusion || "已形成结论，请在后续任务中补充执行细节。";
+}
+
+function buildDecisionOutputText(decision) {
+  return `${decision.title}: ${decisionDefaultFinalChoice(decision)}。${decisionDefaultConclusion(decision)}`;
+}
+
+function defaultDecisionOutputTasks(decision) {
+  const fallbackOwner = decision.owner || activeOwners()[0]?.name || "";
+  const sourceFollowUps = Array.isArray(decision.followUps) && decision.followUps.length
+    ? decision.followUps
+    : [[`落实「${decisionDefaultFinalChoice(decision)}」后续执行`, fallbackOwner, -30]];
+  return sourceFollowUps.map(([title, owner, dueOffset]) => ({
+    title: title || "补充后续任务",
+    ownerId: firstOwnerIdByName(owner || fallbackOwner),
+    dueDate: Number.isFinite(dueOffset)
+      ? isoDate(addDays(new Date(state.profile.date), dueOffset))
+      : isoDate(addDays(new Date(), 7)),
+  }));
+}
+
+function renderDecisionOutputTaskEditor(tasks) {
+  const list = document.getElementById("decisionOutputTaskList");
+  list.innerHTML = tasks
+    .map((task, index) => `
+      <article class="decision-output-task-row" data-output-task-row>
+        <label>
+          任务内容
+          <input data-output-task-title value="${escapeAttribute(task.title || "")}" placeholder="补充后续任务" autocomplete="off" required />
+        </label>
+        <div class="field-row">
+          <label>
+            负责人
+            <select data-output-task-owner aria-label="后续任务负责人">
+              ${ownerSelectOptions(task.ownerId || activeOwners()[0]?.ownerId || "")}
+            </select>
+          </label>
+          <label>
+            截止日期
+            <input data-output-task-due-date type="date" value="${escapeAttribute(task.dueDate || isoDate(addDays(new Date(), 7)))}" required />
+          </label>
+        </div>
+        <button class="delete-button" data-remove-output-task="${index}" type="button" aria-label="删除后续任务">×</button>
+      </article>
+    `)
+    .join("");
+}
+
+function openDecisionOutputDialog(decisionId) {
+  const decision = state.decisions.find((item) => item.id === decisionId);
+  if (!decision || decision.outputGenerated || decision.status !== "已决定") return;
+  const form = document.getElementById("decisionOutputForm");
+  const tasks = defaultDecisionOutputTasks(decision);
+  decisionOutputDialogState = { decisionId, tasks };
+  form.reset();
+  form.elements.decisionId.value = decisionId;
+  form.elements.outputText.value = buildDecisionOutputText(decision);
+  renderDecisionOutputTaskEditor(tasks);
+  document.getElementById("decisionOutputDialog").showModal();
+}
+
+function readDecisionOutputTasks({ includeEmpty = false } = {}) {
+  const tasks = [...document.querySelectorAll("#decisionOutputTaskList [data-output-task-row]")]
+    .map((row) => {
+      const title = row.querySelector("[data-output-task-title]")?.value.trim() || "";
+      const ownerId = row.querySelector("[data-output-task-owner]")?.value || "";
+      const ownerName = activeOwners().find((owner) => owner.ownerId === ownerId)?.name || "";
+      const dueDate = row.querySelector("[data-output-task-due-date]")?.value || "";
+      return { title, ownerId, ownerName, dueDate };
+    });
+  return includeEmpty ? tasks : tasks.filter((task) => task.title);
+}
+
+function outputDecisionToNode(decisionId, payload = {}) {
   const decision = state.decisions.find((item) => item.id === decisionId);
   if (!decision) return null;
   const node = getNode(decision.nodeId);
   if (!node) return null;
 
-  if (!decision.finalChoice) {
-    decision.finalChoice = decision.options?.[0]?.name || "已决定方案";
-  }
-  if (!decision.conclusion) {
-    decision.conclusion = "已形成结论，后续事项自动加入节点任务。";
-  }
-
-  const outputText = `${decision.title}: ${decision.finalChoice}。${decision.conclusion}`;
+  const outputText = payload.outputText?.trim() || buildDecisionOutputText(decision);
   const alreadyOutput = node.outputs.some((output) => output.sourceDecisionId === decision.id);
   if (!alreadyOutput) {
     node.outputs.push({
@@ -2325,16 +2399,21 @@ function outputDecisionToNode(decisionId) {
     });
   }
 
-  (decision.followUps || []).forEach(([title, owner, dueOffset]) => {
+  const taskDrafts = Array.isArray(payload.tasks) && payload.tasks.length
+    ? payload.tasks
+    : defaultDecisionOutputTasks(decision);
+  taskDrafts.forEach((taskDraft) => {
+    const title = taskDraft.title?.trim();
+    if (!title) return;
     const exists = state.tasks.some((task) => task.sourceDecisionId === decision.id && task.title === title);
     if (!exists) {
       const task = {
         id: uid("task"),
         nodeId: decision.nodeId,
         title,
-        owner,
-        ownerIds: firstOwnerIdByName(owner) ? [firstOwnerIdByName(owner)] : [],
-        dueOffset,
+        owner: taskDraft.ownerName || "",
+        ownerIds: taskDraft.ownerId ? [taskDraft.ownerId] : [],
+        dueDate: taskDraft.dueDate || isoDate(addDays(new Date(), 7)),
         done: false,
         sourceDecisionId: decision.id,
       };
@@ -2642,11 +2721,7 @@ async function handleDecisionClick(event) {
   }
 
   if (action === "output") {
-    const decision = decisionActions.output(actionButton.dataset.decisionId);
-    if (decision) {
-      persistAndRender();
-      showToast("已生成后续任务，并加入执行包素材");
-    }
+    openDecisionOutputDialog(actionButton.dataset.decisionId);
     return;
   }
 
@@ -2744,6 +2819,11 @@ document.addEventListener("click", (event) => {
   if (dialogId === "decisionDialog") {
     document.getElementById("decisionDialog").close();
     decisionDialogState = null;
+    return;
+  }
+  if (dialogId === "decisionOutputDialog") {
+    document.getElementById("decisionOutputDialog").close();
+    decisionOutputDialogState = null;
     return;
   }
   document.getElementById(dialogId)?.close();
@@ -2936,6 +3016,62 @@ document.getElementById("decisionDialogForm").addEventListener("submit", async (
     return;
   }
   saveDecisionDialog();
+});
+
+document.getElementById("addDecisionOutputTaskBtn").addEventListener("click", () => {
+  const tasks = readDecisionOutputTasks({ includeEmpty: true });
+  tasks.push({
+    title: "",
+    ownerId: activeOwners()[0]?.ownerId || "",
+    dueDate: isoDate(addDays(new Date(), 7)),
+  });
+  decisionOutputDialogState = {
+    ...(decisionOutputDialogState || {}),
+    tasks,
+  };
+  renderDecisionOutputTaskEditor(tasks);
+});
+
+document.getElementById("decisionOutputTaskList").addEventListener("click", (event) => {
+  const removeButton = event.target.closest("[data-remove-output-task]");
+  if (!removeButton) return;
+  const removeIndex = Number(removeButton.dataset.removeOutputTask);
+  const tasks = readDecisionOutputTasks({ includeEmpty: true }).filter((_, index) => index !== removeIndex);
+  const nextTasks = tasks.length
+    ? tasks
+    : [{
+        title: "",
+        ownerId: activeOwners()[0]?.ownerId || "",
+        dueDate: isoDate(addDays(new Date(), 7)),
+      }];
+  decisionOutputDialogState = {
+    ...(decisionOutputDialogState || {}),
+    tasks: nextTasks,
+  };
+  renderDecisionOutputTaskEditor(nextTasks);
+});
+
+document.getElementById("decisionOutputForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (event.submitter?.value === "cancel") {
+    document.getElementById("decisionOutputDialog").close();
+    decisionOutputDialogState = null;
+    return;
+  }
+  const form = event.currentTarget;
+  const outputText = form.elements.outputText.value.trim();
+  const tasks = readDecisionOutputTasks();
+  if (!outputText || !tasks.length) {
+    showToast("请先确认执行包素材和至少一个后续任务");
+    return;
+  }
+  const decision = decisionActions.output(form.elements.decisionId.value, { outputText, tasks });
+  if (decision) {
+    document.getElementById("decisionOutputDialog").close();
+    decisionOutputDialogState = null;
+    persistAndRender();
+    showToast("已生成后续任务，并加入执行包素材");
+  }
 });
 
 document.getElementById("nodeDecisionList").addEventListener("input", handleDecisionInput);
@@ -3202,6 +3338,7 @@ document.getElementById("resetBtn").addEventListener("click", () => {
   checklistStatusSavingItemId = "";
   checklistSortDraft = null;
   checklistFormState = null;
+  decisionOutputDialogState = null;
   checklistDrafts.clear();
   persistAndRender();
   showToast("已恢复节点地图原型");

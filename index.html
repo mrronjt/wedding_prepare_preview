@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>喜事计划舱</title>
-    <link rel="stylesheet" href="styles.css?v=20260708-compare-table" />
+    <link rel="stylesheet" href="styles.css?v=20260708-output-review" />
   </head>
   <body>
     <div class="app-shell">
@@ -363,6 +363,32 @@
       </form>
     </dialog>
 
+    <dialog id="decisionOutputDialog">
+      <form method="dialog" class="dialog-card decision-output-dialog" id="decisionOutputForm">
+        <div class="section-heading">
+          <span>生成后续任务</span>
+          <button class="icon-button" value="cancel" type="button" data-close-dialog="decisionOutputDialog" aria-label="关闭">×</button>
+        </div>
+        <input name="decisionId" type="hidden" />
+        <label>
+          执行包素材
+          <textarea name="outputText" rows="4" placeholder="写入最终要交接给执行包的结论" required></textarea>
+        </label>
+        <section class="decision-form-section">
+          <div class="section-heading">
+            <span>后续任务</span>
+            <button class="text-button" id="addDecisionOutputTaskBtn" type="button">添加任务</button>
+          </div>
+          <div class="decision-output-task-list" id="decisionOutputTaskList"></div>
+        </section>
+        <div class="dialog-actions">
+          <span></span>
+          <button class="ghost-button" value="cancel" type="button" data-close-dialog="decisionOutputDialog">取消</button>
+          <button class="primary-button" id="saveDecisionOutputBtn" value="save" type="submit">确认生成</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="checklistItemDialog">
       <form method="dialog" class="dialog-card checklist-dialog" id="checklistItemForm">
         <div class="section-heading">
@@ -468,8 +494,8 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="executionChecklistCore.js?v=20260708-compare-table"></script>
-    <script src="config/execution-checklist-recommendations.js?v=20260708-compare-table"></script>
-    <script src="app.js?v=20260708-compare-table"></script>
+    <script src="executionChecklistCore.js?v=20260708-output-review"></script>
+    <script src="config/execution-checklist-recommendations.js?v=20260708-output-review"></script>
+    <script src="app.js?v=20260708-output-review"></script>
   </body>
 </html>
